@@ -391,6 +391,25 @@ All three FHE products (vesting, airdrop, disperse) have been audited by OpenZep
 
 ---
 
+## Runtime spike plan
+
+Prepared 2026-07-03 (not yet run — pending burner-wallet funding and `.env.local`). Lives at `scripts/spike-tokenops-sepolia.ts`, driven by `npm run spike`.
+
+**Goal:** prove the full lifecycle end-to-end on real Sepolia — mint a test token via the faucet, create+fund a confidential airdrop, sign a recipient claim, have the recipient decrypt-and-verify their allocation *before* claiming, claim, then decrypt-verify the resulting balance. This directly resolves open items #1 and #4 below once it's actually run.
+
+**Setup discovered while preparing it (not guessed — verified against installed `.d.ts` files and confirmed with `npx tsc --noEmit`):**
+
+- Installed `@tokenops/sdk@1.1.1`, `viem@2.54.2`, `@zama-fhe/sdk`, `dotenv`, `typescript`, `tsx` into the project's own `package.json` (previously the project had none).
+- **Found and fixed a real peer-version incompatibility.** `@tokenops/sdk@1.1.1`'s peer range is `@zama-fhe/sdk@^3.0.0`, which resolves to the current latest, `3.2.0` — but `3.2.0` is not structurally compatible with `@tokenops/sdk`'s `Encryptor` interface:
+  - `@tokenops/sdk`'s `Encryptor.encrypt()` requires `Promise<{ handles: Uint8Array[], inputProof: Uint8Array }>`.
+  - `@zama-fhe/sdk@3.2.0`'s relayer `encrypt()` returns `Promise<{ encryptedValues: Hex[], inputProof: Hex }>` instead — renamed field, different byte encoding, part of a broader `createConfig()`/`relayers: {...}` architecture introduced sometime after 3.0.0.
+  - `@zama-fhe/sdk@3.0.0` (the version the `@tokenops/sdk` README's own quickstart snippet actually matches — `RelayerNode`/`SepoliaConfig` from `@zama-fhe/sdk/node`, `ZamaSDK` constructed directly from `{relayer, signer, storage}`) *is* structurally compatible — confirmed by installing it and getting a clean `npx tsc --noEmit`.
+  - **Fix applied:** pinned `@zama-fhe/sdk` to the exact version `"3.0.0"` (not `^3.0.0`) in `package.json`, so a future `npm install` can't silently reintroduce the incompatibility. If `@tokenops/sdk` is ever upgraded, re-run `npx tsc --noEmit` before trusting the pin still holds.
+- `@zama-fhe/sdk@3.0.0`'s actual decrypt-flow API (confirmed via `.d.ts`, one level deeper than the tokenops docs go): `sdk.allow([contractAddress])` for the one-time EIP-712 authorization (later SDK versions rename this `permits.grantPermit` — don't assume the name is stable across versions), then `sdk.userDecrypt([{ handle, contractAddress }])` for the actual decrypt. `sdk.createToken(address).balanceOf(address)` wraps both steps as a convenience for plain token-balance checks.
+- Project is now ESM (`"type": "module"` in `package.json`) — required because `@tokenops/sdk` and `@zama-fhe/sdk` are themselves ESM-first and the script uses top-level `await` for env loading.
+
+**Status:** script written, type-checks clean against the real installed packages. **Not executed** — no transactions have been sent, no Sepolia state has been touched. Waiting on funded burner wallets + `.env.local` before running.
+
 ## Blockers / unknowns still open
 
 1. **`getClaimAmount` vs `claim` ordering / re-callability** — `docs.tokenops.xyz` states a *consumed* signature makes further `getClaimAmount` calls revert (`SignatureAlreadyClaimed`), meaning the "verify after you've claimed" UX (re-decrypting your balance post-claim) must go through the token's own `confidentialBalanceOf` + a generic decrypt, **not** a second `getClaimAmount` call. Confirm this exact revert behavior against a live Sepolia clone before building the post-claim "verify" screen around it.

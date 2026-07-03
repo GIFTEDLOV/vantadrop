@@ -1,0 +1,27 @@
+{
+  "name": "vantadrop",
+  "version": "1.0.0",
+  "description": "Confidential token distributions for teams, investors, and communities.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "spike": "tsx scripts/spike-tokenops-sepolia.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@tokenops/sdk": "^1.1.1",
+    "@zama-fhe/sdk": "3.0.0",
+    "dotenv": "^17.4.2",
+    "viem": "^2.54.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3"
+  }
+}
