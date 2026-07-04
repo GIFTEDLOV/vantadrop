@@ -498,3 +498,63 @@ Privacy framing: this package contains plaintext recipients, amounts, notes, and
 4. **Relayer/CDN latency and availability** (sections 8.1–8.3) now sit in a user-facing path: the create button's first run per browser includes the multi-MB FHE-params cold start inside the "creating-and-funding" step.
 5. **Prompt fatigue is real but bounded** (5–6 prompts at the cap); the UI states the expected count before execution.
 6. The hidden diagnostic page still says "the real issuer/recipient flows are not wired yet" in its safety-controls copy — that page is frozen by phase constraint ("must remain exactly as it is"), so the stale sentence is documented here instead of edited there.
+
+---
+
+## Sender preparation panel
+
+Date: 2026-07-04. This section records the addition of `components/wizard/SenderPrepPanel.tsx`, a readiness panel mounted at the top of `/create` (above the stepper, visible on every wizard step). It helps a sender with a burner wallet verify prerequisites *before* attempting the live Execute step. **It does not run any part of the create flow** — `ExecuteStep.tsx`'s execution behavior is untouched by this phase.
+
+### What the panel checks
+
+| Check | Mechanism | Cost |
+|---|---|---|
+| Wallet connected + address | `useSepoliaWallet()` (existing hook) | free, passive |
+| Current vs required network (Sepolia 11155111) | same hook + `lib/constants.ts` | free, passive |
+| Sepolia ETH balance (gas) | wagmi `useBalance` (free JSON-RPC read, auto once connected on Sepolia; loading/value/error states, `formatEther`) | free, no prompt |
+| CTTT + factory addresses | `lib/constants.ts` values as Etherscan links | — |
+| CTTT confidential-balance readiness | `createTestnetFaucetClient({ publicClient }).confidentialBalanceOf(address)` behind an explicit button — reads the opaque encrypted handle only (see below) | free read, no prompt |
+| Mint test CTTT | `createTestnetFaucetClient({ publicClient, walletClient }).mintConfidential({ amount: 10_000_000n })` (10 CTTT, the spike's own convention) behind an explicit button + burner checkbox | 1 real Sepolia tx |
+| Operator approval | shared `useOperatorApproval()` hook (`lib/tokenops/useOperatorApproval.ts`): free `isOperator` read, then `ensureAirdropFactoryOperator` only after a check returns "needed" + burner checkbox | free read / 1 real tx |
+
+Nothing runs automatically on mount except the wagmi ETH-balance read (a free RPC read, no wallet prompt — same class as the passive chain detection `WalletStatusBar` already performs). Every transaction sits behind its own button, gated by the panel's own burner-wallet acknowledgement checkbox (separate from ExecuteStep's — every live-tx surface carries its own).
+
+### Browser CTTT faucet API — CONFIRMED against the installed package
+
+Verified directly against the installed `@tokenops/sdk@1.1.1`, not the earlier research note:
+
+- **Export path:** the package's `exports` map contains `"./testnet-faucet"` pointing at `dist/testnet-faucet/index.js` / `.d.ts`, which re-exports `createTestnetFaucetClient`, `TestnetFaucetClient`, and `TestnetFaucetClientConfig` from `./faucet.js`.
+- **Constructor** (`dist/testnet-faucet/faucet.d.ts`): `createTestnetFaucetClient(config: TestnetFaucetClientConfig)` where the config is `{ publicClient: PublicClient; walletClient?: WalletClient | undefined; address?; chainId?; telemetry? }`. `walletClient` is documented "Optional for read-only usage" — which is why the readiness check constructs a read-only client that can never prompt.
+- **Mint** (`faucet.d.ts` + `types.d.ts`): `mintConfidential(args: MintConfidentialArgs): Promise<MintConfidentialResult>` with `MintConfidentialArgs = { to?: Address; amount: bigint; account?: Account | Address }` and `MintConfidentialResult = { hash, to, amount, underlyingMinted, handle }` decoded from the `ConfidentialMint` event. The TSDoc states the amount is "PUBLIC — passed as plaintext calldata, emitted in the ConfidentialMint event" — no encryptor, no relayer, no `@zama-fhe` involvement in the mint path.
+- **Balance read:** `confidentialBalanceOf(account?: Address): Promise<Hex>` — returns the `euint64` ciphertext handle; the TSDoc says "The SDK is the producer side only; it does not call `userDecrypt`" and "A never-credited account reads back the zero handle."
+- **Browser safety, checked at the module-graph level:** `dist/testnet-faucet/index.js` pulls in chunks `QE7ZONJ2, JFLEEXKP, M7V2EDPB, BE2AIZ3K, Q2GP5UDC, KWFFIJYX, IVE3QEGD`; the union of their external imports is exactly `viem` and `viem/chains`. No `node:` built-ins, no `@zama-fhe/sdk`, no relayer, no Worker. The exports map also ships `workerd`/`edge-light` conditions pointing at the same ESM files.
+- **Prior live evidence:** `scripts/spike-tokenops-sepolia.ts` already ran `createTestnetFaucetClient({ publicClient, walletClient }).mintConfidential({ amount: 10_000_000n })` successfully against live Sepolia (mint tx `0x2e4b4d06a232770a5db5de15094ae76ff9b0df4f3f48542ee915dc403153ad69`), from viem clients with no Node-only construction.
+
+**Conclusion: the mint button shipped LIVE** (real SDK call, real tx, success rendered only when the promise resolves), not as the disabled fallback. The `to`/`account` args are deliberately omitted so the SDK falls back to `walletClient.account` (the proven omit-`account` browser rule).
+
+Also noted but deliberately NOT used: `@tokenops/sdk/testnet-faucet/react` ships `useMintConfidential`, `useConfidentialBalance`, etc. The headless client was chosen instead because it matches the codebase's existing pattern (explicit state machines around `lib/tokenops` service calls, as in the diagnostic page and ExecuteStep), keeps the mint behind a hard hand-written guard, and avoids introducing a second calling convention for the same SDK.
+
+### CTTT balance: readable, NOT decryptable here — by design
+
+`confidentialBalanceOf` returns an encrypted `bytes32` handle, not a number. Turning that handle into plaintext requires the Zama `allow()` (EIP-712 permit) + `userDecrypt()` relayer round-trip — the *identical* primitive that will power recipient allocation decryption, which is the explicitly-unwired next phase. Building it here "just for the sender's own balance" would be scope creep into that phase, so the panel deliberately does not.
+
+What the panel *can* honestly surface without decrypting: the zero-handle vs non-zero-handle distinction (per the `.d.ts` TSDoc quoted above). "Zero handle" = never credited, mint needed; any other handle = the account has confidential CTTT state (though the amount stays unknown). The UI wording is: *"CTTT balance is confidential. Balance verification may require the Zama decrypt flow. Mint test tokens if needed."*
+
+### Shared operator logic — extraction decision
+
+The check/approve pattern from `/dev/tokenops-diagnostic` was extracted into `lib/tokenops/useOperatorApproval.ts` (same states, same hard guards: approve refuses unless the last check returned "needed" and the burner box is ticked; post-tx it re-runs the free read; an `alreadyOperator` race is reported as an honest no-op). `SenderPrepPanel` consumes the hook. The diagnostic page keeps its original inline copy **unchanged**: it was proven live in a prior phase whose constraint froze it, and refactoring proven diagnostic code for zero user benefit is a worse trade than one documented structural duplication. If the diagnostic ever needs to change anyway, migrate it to the hook then.
+
+### What remains pending
+
+- **Recipient decrypt/claim** — still completely unwired (unchanged from the prior phase). `lib/tokenops/recipient.ts` is called from nowhere; no `allow`/`userDecrypt` runs anywhere in the app.
+- The panel's mint and approve buttons are **wired, not proven live from this panel**: the underlying calls are individually proven (spike mint tx above; diagnostic operator tx `0x368d42…2585`), but no human has clicked *these* buttons yet. Verification this phase was build/lint/hardhat-test/tsc + dev-server content checks only.
+- Full plaintext sender-balance display — blocked on the recipient-decrypt phase's Zama permit/decrypt wiring, and intentionally so.
+
+### How to prepare a wallet before attempting the live /create flow
+
+1. Create/choose a **burner** wallet (browser extension). Never use a wallet holding real funds.
+2. Fund it with Sepolia ETH from any standard faucet (~0.05 ETH gives headroom for the operator tx + create-and-fund + registry tx).
+3. Open `/create`, connect the burner, confirm the panel shows Sepolia (id 11155111) and a non-zero ETH balance.
+4. Get CTTT: tick the burner checkbox and click **Mint test CTTT** (10 CTTT per click; mint more times if your planned total exceeds that), or alternatively run the Node spike script's mint step (`npm run spike` with `.env.local` configured). Re-run the free readiness check — it should flip from "zero handle" to "handle exists".
+5. Click **Check operator approval**; if it returns "Approval needed", click **Approve TokenOps operator** (1 tx). This can also be done on `/dev/tokenops-diagnostic`, or left to the Execute step itself (which checks again and approves only if needed) — doing it here just front-loads one prompt.
+6. Proceed through the wizard; the Execute step re-verifies everything with its own gates before sending anything.

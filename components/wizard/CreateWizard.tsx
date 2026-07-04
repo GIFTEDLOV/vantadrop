@@ -8,6 +8,7 @@ import { PrivacyModel } from "../PrivacyModel";
 import { WalletStatusBar } from "../wallet/WalletStatusBar";
 import { ExecuteStep } from "./ExecuteStep";
 import { RecipientsStep, useCsvParse } from "./RecipientsStep";
+import { SenderPrepPanel } from "./SenderPrepPanel";
 import { DISTRIBUTION_TYPES, WIZARD_STEPS, type WizardState } from "./types";
 
 export function CreateWizard() {
@@ -65,6 +66,13 @@ export function CreateWizard() {
         Six steps. Recipient data stays in your browser — at execution only encrypted
         handles and public metadata go on-chain.
       </p>
+
+      {/* Sender preparation — readiness checks (ETH, CTTT, operator approval),
+          visible on every step so problems surface before step 4. Renders no
+          live action automatically; every tx sits behind its own button. */}
+      <div className="mb-6">
+        <SenderPrepPanel />
+      </div>
 
       {/* Wallet + network status (ExecuteStep renders its own copy on step 4) */}
       {step !== 4 && (
