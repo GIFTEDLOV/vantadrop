@@ -21,6 +21,8 @@
     "viem": "^2.54.2"
   },
   "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox-viem": "^5.0.7",
+    "hardhat": "^3.9.1",
     "tsx": "^4.23.0",
     "typescript": "^6.0.3"
   }
