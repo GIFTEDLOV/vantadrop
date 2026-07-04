@@ -15,6 +15,8 @@ import {
 import { formatRawUnits } from "../../lib/csv";
 import { Badge, Card } from "../ui";
 import { PrivacyModel } from "../PrivacyModel";
+import { useSepoliaWallet } from "../wallet/hooks";
+import { WalletStatusBar } from "../wallet/WalletStatusBar";
 import { RecipientsStep, useCsvParse } from "./RecipientsStep";
 import { DISTRIBUTION_TYPES, WIZARD_STEPS, type WizardState } from "./types";
 
@@ -26,10 +28,16 @@ export function CreateWizard() {
     csvText: "",
   });
   const [copied, setCopied] = useState(false);
+  const [executeNotice, setExecuteNotice] = useState(false);
 
+  const wallet = useSepoliaWallet();
   const parsed = useCsvParse(state.csvText);
   const tokenValid = isAddress(state.tokenAddress.trim(), { strict: false });
   const selectedType = DISTRIBUTION_TYPES.find((t) => t.id === state.typeId) ?? null;
+
+  // Same validity signal the Recipients step gate uses — no separate validation path.
+  const recipientsValid = parsed.validCount >= 1 && parsed.errorCount === 0;
+  const executeReady = wallet.isConnected && wallet.isOnSepolia && recipientsValid;
 
   const canProceed = useMemo(() => {
     switch (step) {
@@ -66,9 +74,14 @@ export function CreateWizard() {
         </h1>
         <Badge tone="neutral">Sepolia</Badge>
       </div>
-      <p className="mb-8 text-sm text-zinc-500">
+      <p className="mb-6 text-sm text-zinc-500">
         Six steps. Recipient data stays in your browser until execution.
       </p>
+
+      {/* ---------------- Wallet + network status (visible throughout) ---------------- */}
+      <div className="mb-8">
+        <WalletStatusBar />
+      </div>
 
       {/* ---------------- Stepper ---------------- */}
       <ol className="mb-10 flex flex-wrap items-center gap-2">
@@ -254,9 +267,74 @@ export function CreateWizard() {
               </dl>
             </Card>
 
+            {/* -------- Execution readiness checklist (real, checked conditions) -------- */}
+            <Card className="p-5">
+              <h3 className="text-sm font-semibold text-white">Execution readiness</h3>
+              <p className="mt-1 text-[13px] text-zinc-500">
+                Three real preconditions, checked live. Meeting all three prepares this step
+                for the next phase — it does not make execution available yet.
+              </p>
+              <ul className="mt-4 space-y-2.5">
+                {[
+                  {
+                    ok: wallet.isConnected,
+                    label: "Wallet connected",
+                    missing: "Connect a browser wallet using the panel above.",
+                  },
+                  {
+                    ok: wallet.isOnSepolia,
+                    label: "Sepolia network selected",
+                    missing: wallet.isConnected
+                      ? "Switch your wallet to Sepolia using the panel above."
+                      : "Requires a connected wallet first.",
+                  },
+                  {
+                    ok: recipientsValid,
+                    label: `Recipients valid (${parsed.validCount} valid, ${parsed.errorCount} error${parsed.errorCount === 1 ? "" : "s"})`,
+                    missing: "Go back to the Recipients step and fix the CSV.",
+                  },
+                ].map((check) => (
+                  <li key={check.label} className="flex items-start gap-2.5 text-[13px]">
+                    <span
+                      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border font-mono text-[10px] ${
+                        check.ok
+                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                          : "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                      }`}
+                    >
+                      {check.ok ? "✓" : "!"}
+                    </span>
+                    <span className={check.ok ? "text-zinc-300" : "text-zinc-400"}>
+                      {check.label}
+                      {!check.ok && (
+                        <span className="ml-2 text-amber-300/90">— {check.missing}</span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={!executeReady}
+                  onClick={() => setExecuteNotice(true)}
+                  className="rounded-lg bg-gradient-to-r from-violet-500 to-indigo-600 px-6 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Execute distribution
+                </button>
+                <Badge tone="pending">Not yet wired — next phase</Badge>
+              </div>
+              {executeNotice && (
+                <p className="mt-3 text-[13px] leading-relaxed text-amber-300">
+                  No transaction was sent. Browser TokenOps execution is the next phase.
+                  Sepolia flow is already proven in scripts/spike-tokenops-sepolia.ts.
+                </p>
+              )}
+            </Card>
+
             <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.05] p-6">
               <div className="flex items-center gap-3">
-                <Badge tone="pending">Live SDK wiring pending in frontend</Badge>
+                <Badge tone="pending">Browser TokenOps execution pending</Badge>
               </div>
               <p className="mt-3 text-sm leading-relaxed text-zinc-300">
                 This wizard does not yet submit transactions from a browser wallet — and it will
@@ -314,9 +392,11 @@ export function CreateWizard() {
                 </li>
               </ul>
               <p className="mt-4 text-[13px] leading-relaxed text-zinc-500">
-                Wiring this step to a browser wallet (encrypt each allocation → sign claim
-                authorizations → createAndFundConfidentialAirdrop) is the next phase. Nothing on
-                this page fabricates a transaction result.
+                Browser TokenOps execution is the next phase. Sepolia flow is already proven in
+                scripts/spike-tokenops-sepolia.ts. A connected Sepolia wallet and valid
+                recipients satisfy this page&apos;s checks, but do not mean the not-yet-wired
+                TokenOps call would succeed — nothing on this page fabricates a transaction
+                result.
               </p>
             </div>
           </div>

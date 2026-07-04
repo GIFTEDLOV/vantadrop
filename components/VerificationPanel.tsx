@@ -88,8 +88,11 @@ export function VerificationPanel({ compact = false }: { compact?: boolean }) {
         <KeyValueRow label="Claim (confidential value transfer)">
           <Badge tone="proven">Proven live</Badge>
         </KeyValueRow>
-        <KeyValueRow label="Browser-wallet execution from this UI">
-          <Badge tone="pending">Wiring pending</Badge>
+        <KeyValueRow label="Browser wallet connect + Sepolia detection">
+          <Badge tone="neutral">Live in this UI</Badge>
+        </KeyValueRow>
+        <KeyValueRow label="Browser TokenOps execution from this UI">
+          <Badge tone="pending">Wiring pending — next phase</Badge>
         </KeyValueRow>
       </Card>
     </div>

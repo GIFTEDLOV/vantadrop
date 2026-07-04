@@ -9,13 +9,18 @@ import {
   ZAMA_SDK_VERSION,
 } from "../lib/constants";
 import { AddressLink, Badge, Card, TxLink } from "./ui";
+import { useSepoliaWallet } from "./wallet/hooks";
+import { NetworkGuard } from "./wallet/NetworkGuard";
+import { WalletButton } from "./wallet/WalletButton";
+import { WalletStatusBar } from "./wallet/WalletStatusBar";
 
 /**
  * Demo recipient portal.
  *
- * HONESTY CONTRACT: no browser wallet is connected and no transaction is sent
- * from this page. Every stage shows two things, clearly separated:
- *   1. what the live flow will do once wallet wiring lands, and
+ * HONESTY CONTRACT: wallet connection and Sepolia network detection are now
+ * live in this UI — but no transaction is sent from this page. Every stage
+ * shows two things, clearly separated:
+ *   1. what the live flow will do once browser TokenOps execution lands, and
  *   2. what the proven Sepolia spike (scripts/spike-tokenops-sepolia.ts)
  *      actually did, with the real transaction hash / decrypted result.
  * Advancing through stages is a walkthrough of proven facts — it never
@@ -32,35 +37,33 @@ interface Stage {
 export function RecipientPortal() {
   // How many stages of the walkthrough have been revealed (stage 0 always visible).
   const [revealed, setRevealed] = useState(0);
-  const [walletNotice, setWalletNotice] = useState(false);
+  const wallet = useSepoliaWallet();
 
   const stages: Stage[] = [
     {
       title: "Connect wallet",
       liveAction:
-        "Live flow: connect the recipient wallet (e.g. via a wallet library such as wagmi/RainbowKit) on Sepolia.",
+        "Live flow: connect the recipient wallet on Sepolia — this part is now real in this UI (wagmi injected connector).",
       provenFact: (
         <div className="space-y-3">
           <p className="text-[13px] leading-relaxed text-zinc-400">
-            Wallet connection is <span className="text-amber-300">not yet wired</span> in this
-            UI. In the proven spike, the recipient was a burner wallet driven by a Node script:
+            Wallet connection is <span className="text-emerald-300">live in this UI</span> —
+            connect and network-check below. Connecting does{" "}
+            <span className="text-zinc-200">not</span> make you the demo recipient, and no
+            transaction is sent: in the proven spike, the recipient was a burner wallet driven
+            by a Node script:
           </p>
           <p className="text-sm">
-            <span className="mr-2 text-zinc-500">Recipient:</span>
+            <span className="mr-2 text-zinc-500">Spike recipient:</span>
             <AddressLink address={DEMO.recipient} />
           </p>
-          <div>
-            <button
-              type="button"
-              onClick={() => setWalletNotice(true)}
-              className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-zinc-200 transition hover:bg-white/10"
-            >
-              Connect Wallet
-            </button>
-            {walletNotice && (
-              <p className="mt-2 text-[13px] text-amber-300">
-                Not yet wired — no wallet library is connected in this demo UI. Nothing was
-                connected, and nothing will pretend it was.
+          <div className="space-y-3">
+            <WalletButton />
+            <NetworkGuard />
+            {wallet.isConnected && (
+              <p className="text-[13px] text-zinc-500">
+                Connected — detection only. Eligibility checks, decryption, and claiming from
+                this browser are still pending TokenOps execution wiring.
               </p>
             )}
           </div>
@@ -184,7 +187,8 @@ export function RecipientPortal() {
     <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone="demo">Demo UI — based on proven Sepolia spike</Badge>
-        <Badge tone="pending">Browser wallet not yet wired</Badge>
+        <Badge tone="neutral">Wallet connect live</Badge>
+        <Badge tone="pending">Browser TokenOps execution pending</Badge>
       </div>
       <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white">
         Recipient portal
@@ -202,7 +206,11 @@ export function RecipientPortal() {
         perform.
       </p>
 
-      <ol className="mt-10 space-y-4">
+      <div className="mt-6">
+        <WalletStatusBar />
+      </div>
+
+      <ol className="mt-8 space-y-4">
         {stages.map((stage, i) => {
           const isRevealed = i <= revealed;
           const isCurrent = i === revealed;
@@ -227,7 +235,7 @@ export function RecipientPortal() {
                   </span>
                   <h2 className="text-base font-semibold text-white">{stage.title}</h2>
                   {isRevealed && i !== 0 && <Badge tone="proven">Proven in spike</Badge>}
-                  {i === 0 && <Badge tone="pending">Wiring pending</Badge>}
+                  {i === 0 && <Badge tone="neutral">Wallet connect live</Badge>}
                 </div>
 
                 {isRevealed && (

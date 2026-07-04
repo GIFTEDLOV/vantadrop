@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Badge, SectionLabel } from "../../components/ui";
 import { VerificationPanel } from "../../components/VerificationPanel";
+import { WalletReadiness } from "../../components/wallet/WalletReadiness";
 
 export const metadata: Metadata = {
   title: "Live Verification",
@@ -25,12 +26,17 @@ export default function VerificationPage() {
         . Each link opens Etherscan — no claim on this page requires trusting VantaDrop.
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
-        <Badge tone="proven">Recipient self-decryption: proven live</Badge>
-        <Badge tone="proven">Claim: proven live</Badge>
-        <Badge tone="pending">Browser-wallet UI wiring: pending</Badge>
+        <Badge tone="proven">Recipient self-decryption: proven live (Node spike)</Badge>
+        <Badge tone="proven">Claim: proven live (Node spike)</Badge>
+        <Badge tone="neutral">Browser wallet connect: live</Badge>
+        <Badge tone="pending">Browser TokenOps execution: pending</Badge>
       </div>
 
       <div className="mt-10">
+        <WalletReadiness />
+      </div>
+
+      <div className="mt-4">
         <VerificationPanel />
       </div>
     </div>

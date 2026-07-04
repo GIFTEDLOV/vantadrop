@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
+import { Providers } from "./providers";
 
 export const metadata: Metadata = {
   title: {
@@ -49,7 +50,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </header>
 
-        <main>{children}</main>
+        <Providers>
+          <main>{children}</main>
+        </Providers>
 
         <footer className="mt-24 border-t border-white/[0.06]">
           <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 text-[13px] text-zinc-500 sm:flex-row sm:items-center sm:justify-between sm:px-6">

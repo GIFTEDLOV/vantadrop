@@ -19,13 +19,15 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@tanstack/react-query": "^5.101.2",
     "@tokenops/sdk": "^1.1.1",
     "@zama-fhe/sdk": "3.0.0",
     "dotenv": "^17.4.2",
     "next": "^16.2.10",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "viem": "^2.54.2"
+    "viem": "^2.54.2",
+    "wagmi": "^2.19.5"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox-viem": "^5.0.7",
