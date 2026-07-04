@@ -388,3 +388,34 @@ As of this checkpoint the page **exists and compiles/builds/renders (verified vi
 ### Next phase (after a human confirms both diagnostics)
 
 Once both buttons have been manually run against a funded burner wallet and both succeed (confirmed operator tx hash + real encryption handle), open questions 1 and 6 are closed empirically, and the next phase is wiring the real multi-step issuer flow into `/create` (§5 sequence: bundle → operator → `createAndFundAirdrop` → per-recipient encrypt loop → `signRecipientClaims` → `writeRegisterDistribution`), informed by whatever the diagnostic taught (actual wallet-prompt UX, relayer cold-start latency, any error shapes seen). If either diagnostic fails, fix that primitive first — the wizard wiring stays blocked until both pass.
+
+## Live browser diagnostic result
+
+Date: 2026-07-04. Both diagnostics above were manually run by a human, in a real browser, against a funded burner wallet on live Sepolia. This section records that result — it is the empirical confirmation the plan above was waiting on, closing open questions 1 and 6.
+
+**Route tested:** `http://localhost:3000/dev/tokenops-diagnostic`
+
+**Wallet:** connected, on Sepolia (chain id `11155111`) — the Sepolia network guard correctly confirmed the required chain before either diagnostic was run.
+
+**Operator approval diagnostic — passed:**
+- Check result: **Already approved** (the factory was already an authorized ERC-7984 operator on the connected wallet's CTTT balance from prior sessions — a real, correct read, not the "needs approval" path).
+- Approval transaction state: **Confirmed** — tx `0x368d42…2585` shown in the UI as an Etherscan-linked hash.
+- This proves the omit-`account` injected-wallet write path works: `ensureAirdropFactoryOperator`'s `setOperator` call, which deliberately omits `account` so it falls back to `walletClient.account`, correctly signed and broadcast through the connected browser wallet rather than hitting the "unknown account" bug that broke the original Node spike's first attempt.
+
+**Browser encryption diagnostic — passed:**
+- Status: **Encryption success**.
+- An encrypted handle (`bytes32` ciphertext id) was returned.
+- Input proof size: **100 bytes**.
+- The proof was correctly bound to (CTTT token address, connected wallet address) — the ACL binding rule was respected.
+- No airdrop was created, no claim was consumed, no registry write happened — confirmed by the diagnostic's own design (it has no code path capable of any of these) and consistent with what was observed.
+
+**What this proves, concretely:**
+- **`RelayerWeb`/browser encryption is proven live** — the full pipeline (Web Worker boot, `cdn.zama.org` WASM fetch, ZK-proof generation, testnet relayer HTTP round-trip) completed successfully from a real browser tab, not just from the Node-side spike.
+- **Injected wallet + Sepolia guard are proven live** — wallet connect, chain detection, and a real signed transaction via an injected browser wallet (not a raw private-key `Account`) all worked correctly.
+
+**What remains unproven / explicitly still not wired:**
+- **Full issuer flow is still not wired** — `createAndFundAirdrop`, the per-recipient encrypt loop, and `signRecipientClaims` have not been exercised from the browser; this diagnostic never creates or funds a distribution.
+- **Recipient decrypt/claim is still not wired** — `checkRecipientEligibility`, `grantDecryptAccess`, `decryptAllocationHandle`, `claimAllocation`, and `verifyPostClaimBalance` remain unwired service functions; nothing recipient-side has been tested live.
+- **Registry writes are still not wired** — `registerDistribution`/`updateStatus` were not called; the registry frontend remains read-only in practice (only `useTotalDistributions()` is live).
+
+This diagnostic result closes out the two riskiest unknowns identified earlier in this document. The next phase (wiring the real multi-step issuer flow into `/create`) is now informed by a real, positive result rather than a docs/types-only prediction.

@@ -26,11 +26,13 @@ const serviceLayerPresent =
  * imports) — it does NOT mean every function has been exercised against a
  * live wallet transaction.
  *
- * "Added" for the two diagnostics means exactly this: the hidden dev-only
- * page (/dev/tokenops-diagnostic) exists and its buttons perform real SDK
- * calls when a developer manually triggers them with a burner wallet — it
- * does NOT mean those buttons have been run successfully against live
- * Sepolia yet. No line here may claim more than the code actually does.
+ * "Proven live" for the two diagnostics means a human manually ran that
+ * exact button, in a real browser, against a funded burner wallet on live
+ * Sepolia, and it succeeded — see docs/research/browser-tokenops-integration.md
+ * ("Live browser diagnostic result") for the real tx hash and encryption
+ * output this claim is based on. It does NOT mean the full multi-step issuer
+ * or recipient flows have been run — those remain separate, larger, still
+ *-unwired surfaces (see the two "Not wired yet" rows below).
  */
 export function IntegrationStatus() {
   const totalDistributions = useTotalDistributions();
@@ -40,11 +42,11 @@ export function IntegrationStatus() {
       <h3 className="mb-1 text-sm font-semibold text-white">Integration status</h3>
       <p className="mb-3 text-[13px] text-zinc-500">
         Where the browser integration actually stands. &quot;Ready&quot; means typed
-        service functions exist and compile into this bundle. &quot;Added&quot; means the
-        hidden dev diagnostic page exists and is wired for manual testing — its buttons
-        make real calls when a developer clicks them, but they have not been run against
-        a live wallet yet. The only live transaction surface is that dev-only diagnostic;
-        no production flow sends transactions yet.
+        service functions exist and compile into this bundle. &quot;Proven live&quot; means a
+        human clicked that exact button against a funded burner wallet on live Sepolia
+        and it succeeded. The dev-only diagnostic page is still the only surface that has
+        ever sent a live transaction or run a live encryption — no production flow
+        (the wizard, the recipient portal) sends transactions yet.
       </p>
       <KeyValueRow label="Wallet foundation">
         <Badge tone="proven">Ready</Badge>
@@ -52,19 +54,22 @@ export function IntegrationStatus() {
       <KeyValueRow label="Sepolia guard">
         <Badge tone="proven">Ready</Badge>
       </KeyValueRow>
-      <KeyValueRow label="Browser service layer">
+      <KeyValueRow label="Browser TokenOps service layer">
         <Badge tone="proven">{serviceLayerPresent ? "Ready" : "Missing"}</Badge>
       </KeyValueRow>
       <KeyValueRow label="Browser operator diagnostic">
-        <Badge tone="demo">Added</Badge>
+        <Badge tone="proven">Proven live</Badge>
       </KeyValueRow>
       <KeyValueRow label="Browser encryption diagnostic">
-        <Badge tone="demo">Added</Badge>
+        <Badge tone="proven">Proven live</Badge>
       </KeyValueRow>
       <KeyValueRow label="Full issuer execution">
         <Badge tone="pending">Not wired yet</Badge>
       </KeyValueRow>
       <KeyValueRow label="Recipient decrypt/claim">
+        <Badge tone="pending">Not wired yet</Badge>
+      </KeyValueRow>
+      <KeyValueRow label="Registry frontend writes">
         <Badge tone="pending">Not wired yet</Badge>
       </KeyValueRow>
       <div className="mt-4 border-t border-white/[0.05] pt-3">
