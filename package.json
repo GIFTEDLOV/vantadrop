@@ -8,7 +8,11 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "spike": "tsx scripts/spike-tokenops-sepolia.ts"
+    "spike": "tsx scripts/spike-tokenops-sepolia.ts",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint app components lib next.config.ts"
   },
   "keywords": [],
   "author": "",
@@ -18,11 +22,21 @@
     "@tokenops/sdk": "^1.1.1",
     "@zama-fhe/sdk": "3.0.0",
     "dotenv": "^17.4.2",
+    "next": "^16.2.10",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "viem": "^2.54.2"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox-viem": "^5.0.7",
+    "@tailwindcss/postcss": "^4.3.2",
+    "@types/node": "^26.1.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.10",
     "hardhat": "^3.9.1",
+    "tailwindcss": "^4.3.2",
     "tsx": "^4.23.0",
     "typescript": "^6.0.3"
   }
