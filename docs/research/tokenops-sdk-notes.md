@@ -408,12 +408,67 @@ Prepared 2026-07-03 (not yet run — pending burner-wallet funding and `.env.loc
 - `@zama-fhe/sdk@3.0.0`'s actual decrypt-flow API (confirmed via `.d.ts`, one level deeper than the tokenops docs go): `sdk.allow([contractAddress])` for the one-time EIP-712 authorization (later SDK versions rename this `permits.grantPermit` — don't assume the name is stable across versions), then `sdk.userDecrypt([{ handle, contractAddress }])` for the actual decrypt. `sdk.createToken(address).balanceOf(address)` wraps both steps as a convenience for plain token-balance checks.
 - Project is now ESM (`"type": "module"` in `package.json`) — required because `@tokenops/sdk` and `@zama-fhe/sdk` are themselves ESM-first and the script uses top-level `await` for env loading.
 
-**Status:** script written, type-checks clean against the real installed packages. **Not executed** — no transactions have been sent, no Sepolia state has been touched. Waiting on funded burner wallets + `.env.local` before running.
+**Status:** script written, type-checked, and **run successfully against live Sepolia**. See "Live Sepolia Runtime Spike Result" below.
+
+---
+
+## Live Sepolia Runtime Spike Result
+
+**Date:** 2026-07-04
+**Network:** Ethereum Sepolia (chain id `11155111`)
+**`@tokenops/sdk` version:** `1.1.1` (unchanged from research above)
+**`@zama-fhe/sdk` pin:** exactly `3.0.0` (not `^3.0.0` — see the peer-version-incompatibility note above; this pin is load-bearing, do not loosen it without re-running `npx tsc --noEmit`)
+
+**Wallets used (burner wallets, testnet only):**
+- Sender/admin: `0x3773537741fADe12d2081e7602d56Bc003b69C60`
+- Recipient: `0x459dCE6958Ac3DC171FE4B51a8a12EafF57C165A`
+
+**Contracts involved:**
+- CTTT token (testnet faucet): `0x258F9D60dc023870e4E3109c894D834D5377361a`
+- Confidential airdrop factory (pre-deployed by TokenOps): `0xbE6A3B78B36684fFee48De77d47Bc3393F5Acd4c`
+- Airdrop clone created by this run: `0x8cFE4cab5A3ca843B94B1A4765D6DA780547ee14`
+
+**Transactions:**
+
+| Step | Tx hash |
+|---|---|
+| `mintConfidential` (testnet faucet) | `0x2e4b4d06a232770a5db5de15094ae76ff9b0df4f3f48542ee915dc403153ad69` |
+| `createAndFundConfidentialAirdrop` | `0x7ec47177768fad44fc975a7d79b1c58b2fb18c45828acf573d42b08d8d744578` |
+| `getClaimAmount` (recipient decrypt-grant) | `0xc635b966543fe1226f27bced74a3016046b773e554a98a407cdbd73fac6c48c0` |
+| `claim` | `0xd9790e674fea8394b3ad8378aadb6aceff069ebcc6916cc72831550529d70f24` |
+
+**What succeeded, end to end, on real Sepolia state (not a simulation):**
+- `setOperator` — factory authorized as ERC-7984 operator on CTTT (verified live via `isOperator` read on a resumed run).
+- `createAndFundConfidentialAirdrop` — airdrop clone deployed and funded with `1,000,000` raw CTTT units in one tx.
+- `encryptUint64` + `signClaimAuthorization` — recipient allocation encrypted and admin-signed off-chain.
+- `preflightClaim` → `ready: true`.
+- `isSignatureValid` → `true`.
+- `getClaimAmount` — recipient granted ACL decrypt access on the allocation handle, **before** claiming.
+- Recipient decrypt via `ZamaSDK.allow([airdrop])` + `ZamaSDK.userDecrypt([...])` → decrypted allocation **`1000000`**, exactly matching the `1_000_000n` the admin encrypted. This is the bounty's headline "recipient verifies/decrypts their own allocation" requirement, now proven live, not theoretical.
+- `claim` — recipient claimed successfully; tx confirmed.
+- Post-claim verification: recipient's CTTT `confidentialBalanceOf`, decrypted via `ZamaSDK.createToken(cttt).balanceOf(...)`, read back as **`1000000`** — proving the confidential transfer actually moved value, not just that the claim tx didn't revert.
+
+**Account-object bug discovered and fixed:**
+
+The first attempt at `createAndFundConfidentialAirdrop` failed before broadcasting, with the SDK's generic fallback error `TOKENOPS_UNKNOWN_WRITE_FAILURE`. Improved error logging in the spike script (full `.cause` chain + `util.inspect(err, {depth: 8})`) surfaced the real root cause underneath the SDK's generic classification:
+
+```
+cause.details: unknown account
+cause (non-Error): { code: -32000, message: 'unknown account' }
+```
+
+**Root cause:** several calls in the script passed `account: senderAccount.address` / `account: recipientAccount.address` — a plain address **string** — as the explicit `account` argument to a TokenOps SDK write call. viem's `writeContract` dispatches `eth_sendTransaction` (the custodial-wallet path) when handed a plain address string, and public RPCs (e.g. `ethereum-sepolia-rpc.publicnode.com`) reject that with `unknown account`, since they don't custody keys. Passing the **full `Account` object** (as returned by `privateKeyToAccount`) instead makes viem sign locally and dispatch `eth_sendRawTransaction`, which every RPC accepts. This exact footgun is already documented in the SDK's own `setOperator` TSDoc (see the Confidential airdrop section above) — the bug was in this project's spike script, not in `@tokenops/sdk`.
+
+**Correct pattern:** pass the full `Account` object (`account: senderAccount`, not `account: senderAccount.address`) to any TokenOps SDK write call that accepts an explicit `account` override — or, simplest of all, omit `account` entirely and let the call fall back to `walletClient.account`, which is already the full object when the wallet client was constructed via `createWalletClient({ account: someAccount, ... })`. Three call sites needed this fix: `createAndFundConfidentialAirdrop`, `getClaimAmount`, `claim`.
+
+**Final conclusion:** recipient decrypt/verify and claim are now **proven live on Sepolia**, with real transaction hashes as evidence, not just verified against types and documentation. The frontend can be built directly on top of the exact call sequence in `scripts/spike-tokenops-sepolia.ts`, which is now the canonical, working integration reference for this project.
+
+---
 
 ## Blockers / unknowns still open
 
-1. **`getClaimAmount` vs `claim` ordering / re-callability** — `docs.tokenops.xyz` states a *consumed* signature makes further `getClaimAmount` calls revert (`SignatureAlreadyClaimed`), meaning the "verify after you've claimed" UX (re-decrypting your balance post-claim) must go through the token's own `confidentialBalanceOf` + a generic decrypt, **not** a second `getClaimAmount` call. Confirm this exact revert behavior against a live Sepolia clone before building the post-claim "verify" screen around it.
+1. ~~`getClaimAmount` vs `claim` ordering / re-callability~~ — **Resolved for the pre-claim case**: `getClaimAmount` → decrypt → `claim` was proven to work in that order on live Sepolia. The specific claim that a second `getClaimAmount` call *after* claiming reverts (`SignatureAlreadyClaimed`) was not itself re-tested (the spike didn't attempt it) — the script sidesteps this entirely by using the token's own `confidentialBalanceOf` for post-claim verification instead of calling `getClaimAmount` again, which is now proven to work. Treat "does `getClaimAmount` still work post-claim" as a non-issue for the UI design, since the working pattern doesn't need it to.
 2. **`fhe-vesting` and `fhe-disperse` .d.ts files were not read as deeply as `fhe-airdrop`'s** (time-boxed for this pass) — if the build plan scopes in vesting or disperse, repeat the `.d.ts` read pass (`dist/fhe-vesting/manager.d.ts`, `dist/fhe-vesting/factory.d.ts`, `dist/fhe-disperse/types.d.ts`) before writing integration code against them.
 3. **`docs.tokenops.xyz` repo is private** (`github.com/VestingLabs/tokenops-sdk` 404s on unauthenticated access) — no access to source, tests, or the "CLAUDE.md Pitfall #1/#3" notes referenced in the shipped TSDoc comments themselves (e.g. "SDK methods that return an encrypted handle MUST parse the receipt's ACL `Allowed` event, never `simulateContract().result`" — Pitfall #1; "lazy encryptor factories must return a fresh instance per wallet-switch" — Pitfall #3). We only have these secondhand, embedded in comments — treat them as authoritative since they're quoted verbatim from the package's own doc comments, but there may be more pitfalls we haven't seen.
-4. **No live Sepolia round-trip has been executed yet** — everything above is verified against types/docs, not a live claim/decrypt transaction. Before demo day, run one full cycle (mint CTTT from faucet → create+fund airdrop → sign claim → recipient claims → recipient decrypts) against real Sepolia to catch any runtime surprises (relayer latency, gas estimation, wallet UX) that don't show up in types.
-5. **`@zama-fhe/react-sdk`'s exact hook catalogue** (`ZamaProvider`, `useZamaSDK`, permit hooks) was researched in an earlier pass via docs.zama.org, not re-verified against an installed copy in this pass — worth a quick `.d.ts` check of `@zama-fhe/react-sdk` alongside `@tokenops/sdk` once the app scaffold exists, since VantaDrop's decrypt UI depends on it directly.
+4. ~~No live Sepolia round-trip has been executed yet~~ — **Resolved.** See "Live Sepolia Runtime Spike Result" above — a full cycle (mint → create+fund → sign → preflight → decrypt-verify → claim → post-claim decrypt-verify) has run successfully against real Sepolia state with real transaction hashes.
+5. **`@zama-fhe/react-sdk`'s exact hook catalogue** (`ZamaProvider`, `useZamaSDK`, permit hooks) was researched in an earlier pass via docs.zama.org, not re-verified against an installed copy in this pass — worth a quick `.d.ts` check of `@zama-fhe/react-sdk` alongside `@tokenops/sdk` once the app scaffold exists, since VantaDrop's decrypt UI depends on it directly. Note: the spike proved the **Node-side** (`@zama-fhe/sdk` core, not `/react`) decrypt flow works; the React hook layer for the actual frontend is still unverified against installed types.

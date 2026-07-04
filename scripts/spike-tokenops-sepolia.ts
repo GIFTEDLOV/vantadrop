@@ -10,9 +10,19 @@
  *
  * Run with: npm run spike   (== tsx scripts/spike-tokenops-sepolia.ts)
  *
+ * Resume mode: if a prior run already completed mintConfidential (and/or setOperator),
+ * set SPIKE_RESUME_AIRDROP_ONLY=true to skip the mint step (the CTTT address is fixed
+ * per chain, so no mint is needed to resolve it). setOperator is always checked live via
+ * `isOperator` first and skipped if already authorized, regardless of this flag — that
+ * check is cheap and safe to run every time, resume mode or not.
+ *   PowerShell: $env:SPIKE_RESUME_AIRDROP_ONLY="true"; npm run spike
+ *
  * This script never logs private keys — only derived public addresses, tx hashes,
  * contract addresses, and (once decrypted) the plaintext allocation amount, which is
- * the entire point of the "recipient verifies their own allocation" step.
+ * the entire point of the "recipient verifies their own allocation" step. On failure,
+ * describeError() prints full diagnostic depth (name/message/code/context/shortMessage/
+ * details/cause chain/util.inspect dump) but always redacts the two loaded private key
+ * values by exact substring match before printing anything.
  *
  * ---------------------------------------------------------------------------
  * IMPORTANT — confirmed peer-version incompatibility (found via `tsc --noEmit`,
@@ -55,6 +65,7 @@
  */
 
 import { existsSync } from "node:fs";
+import util from "node:util";
 import {
   createPublicClient,
   createWalletClient,
@@ -74,7 +85,7 @@ import { RelayerNode, SepoliaConfig } from "@zama-fhe/sdk/node";
 import { ViemSigner } from "@zama-fhe/sdk/viem";
 
 import { getFheAirdropFactoryAddress, isTokenOpsSdkError } from "@tokenops/sdk";
-import { setOperator } from "@tokenops/sdk/fhe";
+import { setOperator, erc7984OperatorAbi } from "@tokenops/sdk/fhe";
 import { createTestnetFaucetClient } from "@tokenops/sdk/testnet-faucet";
 import {
   createConfidentialAirdropFactoryClient,
@@ -107,19 +118,95 @@ const senderPrivateKey = requireEnv("SENDER_PRIVATE_KEY") as Hex;
 const recipientPrivateKey = requireEnv("RECIPIENT_PRIVATE_KEY") as Hex;
 const recipientAddressEnv = requireEnv("RECIPIENT_ADDRESS") as Address;
 
+/**
+ * When true: skip `mintConfidential` entirely (assumes the sender already
+ * holds CTTT from a prior run — the CTTT proxy address is a fixed, pre-deployed
+ * address per chain, not something that changes per mint, so no mint tx is
+ * needed to resolve it). `setOperator` is checked-then-skipped via a live
+ * `isOperator` read regardless of this flag, since that check is cheap and
+ * safe to run every time.
+ */
+const resumeAirdropOnly = process.env.SPIKE_RESUME_AIRDROP_ONLY === "true";
+
 // ---------------------------------------------------------------------------
-// Helper: pretty-print a TokenOpsSdkError (or any error) without ever touching
-// process.env values or account objects that might carry key material.
+// Helper: pretty-print a TokenOpsSdkError (or any error) in full diagnostic
+// depth, without ever printing private keys.
+//
+// Safety net: whatever gets built below is passed through redactSecrets()
+// before being returned, which does an exact (not pattern-based) substring
+// replacement of the two loaded private key values. A regex like
+// /0x[a-f0-9]{64}/ was deliberately NOT used for this — tx hashes, encrypted
+// handles, and signatures are also 32/65-byte 0x-hex strings we WANT to show,
+// and a blanket pattern would redact those too. Exact-match on the two known
+// secret values is the only redaction that can't collide with legitimate data.
 // ---------------------------------------------------------------------------
 
+function redactSecrets(text: string): string {
+  let out = text;
+  for (const secret of [senderPrivateKey, recipientPrivateKey]) {
+    if (secret) out = out.split(secret).join("[REDACTED_PRIVATE_KEY]");
+  }
+  return out;
+}
+
+/** Recursively format an error's `.cause` chain (viem/tokenops errors nest
+ * a raw RPC/relayer error under `.cause`, which is where the actually useful
+ * diagnostic detail usually lives). */
+function formatCause(cause: unknown, depth = 0): string {
+  const indent = "  ".repeat(depth + 1);
+  if (cause === undefined || cause === null) return "";
+  if (!(cause instanceof Error)) {
+    return `${indent}cause (non-Error): ${util.inspect(cause, { depth: 8, colors: false })}`;
+  }
+  const anyCause = cause as Error & Record<string, unknown>;
+  const lines: string[] = [
+    `${indent}cause.name: ${anyCause.name}`,
+    `${indent}cause.message: ${anyCause.message}`,
+  ];
+  if (typeof anyCause.shortMessage === "string") lines.push(`${indent}cause.shortMessage: ${anyCause.shortMessage}`);
+  if (typeof anyCause.details === "string") lines.push(`${indent}cause.details: ${anyCause.details}`);
+  if ("data" in anyCause && anyCause.data !== undefined) {
+    lines.push(`${indent}cause.data: ${util.inspect(anyCause.data, { depth: 8, colors: false })}`);
+  }
+  if (Array.isArray(anyCause.metaMessages)) {
+    lines.push(`${indent}cause.metaMessages:`);
+    for (const m of anyCause.metaMessages as unknown[]) lines.push(`${indent}  ${String(m)}`);
+  }
+  if (typeof anyCause.stack === "string") {
+    lines.push(`${indent}cause.stack:`);
+    lines.push(anyCause.stack.split("\n").map((l) => `${indent}  ${l}`).join("\n"));
+  }
+  if (anyCause.cause) {
+    lines.push(`${indent}--- nested cause ---`);
+    lines.push(formatCause(anyCause.cause, depth + 1));
+  }
+  return lines.join("\n");
+}
+
 function describeError(err: unknown): string {
-  if (isTokenOpsSdkError(err)) {
-    return `[${err.code}] ${err.message}\ncontext: ${JSON.stringify(err.context, null, 2)}`;
-  }
+  const parts: string[] = [];
+
   if (err instanceof Error) {
-    return `${err.name}: ${err.message}`;
+    const anyErr = err as Error & Record<string, unknown>;
+    parts.push(`name: ${anyErr.name}`);
+    parts.push(`message: ${anyErr.message}`);
+    if (isTokenOpsSdkError(err)) {
+      parts.push(`code: ${err.code}`);
+      parts.push(`context: ${JSON.stringify(err.context, null, 2)}`);
+    }
+    if (typeof anyErr.shortMessage === "string") parts.push(`shortMessage: ${anyErr.shortMessage}`);
+    if (typeof anyErr.details === "string") parts.push(`details: ${anyErr.details}`);
+    if (anyErr.cause) {
+      parts.push(`cause:`);
+      parts.push(formatCause(anyErr.cause));
+    }
+    parts.push(`--- full inspected error object (util.inspect, depth 8) ---`);
+    parts.push(util.inspect(err, { depth: 8, colors: false }));
+  } else {
+    parts.push(`non-Error thrown: ${util.inspect(err, { depth: 8, colors: false })}`);
   }
-  return String(err);
+
+  return redactSecrets(parts.join("\n"));
 }
 
 /** Build a ZamaSDK bound to one wallet. Permits/decryption are signer-specific,
@@ -185,27 +272,45 @@ async function main() {
     // -----------------------------------------------------------------------
     // d. Testnet faucet — mint a distributable confidential token (CTTT).
     //    Answers research question #4 ("can we use the testnet faucet flow").
+    //    Skipped under SPIKE_RESUME_AIRDROP_ONLY=true (sender already holds CTTT
+    //    from a prior successful run).
     // -----------------------------------------------------------------------
     const faucet = createTestnetFaucetClient({ publicClient, walletClient: senderWalletClient });
-    const mintAmount = 10_000_000n; // 10 CTTT at 6 decimals — small, disposable test amount.
-    console.log(`Minting ${mintAmount} raw CTTT units to sender via testnet faucet...`);
-    const mintResult = await faucet.mintConfidential({ amount: mintAmount });
-    console.log(`  mintConfidential tx: ${mintResult.hash}`);
-    const cttTokenAddress = faucet.address; // CTTT proxy address this client is bound to.
+    const cttTokenAddress = faucet.address; // CTTT proxy address — fixed per chain, no mint needed to resolve it.
     console.log(`  CTTT token address: ${cttTokenAddress}`);
+
+    if (resumeAirdropOnly) {
+      console.log(`SPIKE_RESUME_AIRDROP_ONLY=true — skipping mintConfidential (assuming sender already holds CTTT).`);
+    } else {
+      const mintAmount = 10_000_000n; // 10 CTTT at 6 decimals — small, disposable test amount.
+      console.log(`Minting ${mintAmount} raw CTTT units to sender via testnet faucet...`);
+      const mintResult = await faucet.mintConfidential({ amount: mintAmount });
+      console.log(`  mintConfidential tx: ${mintResult.hash}`);
+    }
 
     // -----------------------------------------------------------------------
     // b. Create and fund a confidential airdrop.
     //    Answers research question #2 ("can we create/interact with a confidential airdrop").
     // -----------------------------------------------------------------------
-    console.log(`Authorizing airdrop factory as ERC-7984 operator on CTTT...`);
-    await setOperator({
-      publicClient,
-      walletClient: senderWalletClient,
-      token: cttTokenAddress,
-      spender: airdropFactoryAddress,
+    console.log(`Checking whether airdrop factory is already an authorized operator on CTTT...`);
+    const alreadyOperator = await publicClient.readContract({
+      address: cttTokenAddress,
+      abi: erc7984OperatorAbi,
+      functionName: "isOperator",
+      args: [senderAccount.address, airdropFactoryAddress],
     });
-    console.log(`  operator authorized.`);
+    if (alreadyOperator) {
+      console.log(`  already authorized — skipping setOperator.`);
+    } else {
+      console.log(`Authorizing airdrop factory as ERC-7984 operator on CTTT...`);
+      await setOperator({
+        publicClient,
+        walletClient: senderWalletClient,
+        token: cttTokenAddress,
+        spender: airdropFactoryAddress,
+      });
+      console.log(`  operator authorized.`);
+    }
 
     const now = Math.floor(Date.now() / 1000);
     const airdropAmount = 1_000_000n; // 1 CTTT at 6 decimals for this one recipient.
@@ -229,7 +334,7 @@ async function main() {
       userSalt,
       amount: airdropAmount,
       encryptor: senderZama.relayer,
-      account: senderAccount.address,
+      account: senderAccount,
     });
     console.log(`  createAndFundConfidentialAirdrop tx: ${created.hash}`);
     console.log(`  airdrop clone address: ${created.airdrop}`);
@@ -297,7 +402,7 @@ async function main() {
     const claimAmountView = await recipientAirdropClient.getClaimAmount({
       encryptedInput,
       signature,
-      account: recipientAccount.address,
+      account: recipientAccount,
     });
     console.log(`  getClaimAmount tx: ${claimAmountView.hash}`);
     console.log(`  granted handle: ${claimAmountView.handle}`);
@@ -325,7 +430,7 @@ async function main() {
     const claimHash = await recipientAirdropClient.claim({
       encryptedInput,
       signature,
-      account: recipientAccount.address,
+      account: recipientAccount,
     });
     console.log(`  claim tx: ${claimHash}`);
     await publicClient.waitForTransactionReceipt({ hash: claimHash });

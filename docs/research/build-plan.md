@@ -172,10 +172,12 @@ Explicit non-goals, to prevent scope creep from quietly turning a 4-day confiden
 
 Locked sequencing — do not reorder without a reason, since later steps assume earlier ones are settled:
 
-1. **Runtime SDK spike** — prove the SDK calls work on real Sepolia before any product code depends on them (see "Runtime spike plan" below — prepared, not yet run).
-2. **Minimal distribution flow** — issuer side: mint/select token → fund airdrop → generate per-recipient claim payloads, no wizard UI yet, just working calls.
-3. **Recipient decrypt flow** — `getClaimAmount` → permit → `userDecrypt` → `claim`, proven end-to-end for one recipient.
+1. ~~**Runtime SDK spike**~~ — **completed.** Proven on live Sepolia 2026-07-04: real tx hashes for `mintConfidential`, `createAndFundConfidentialAirdrop`, `getClaimAmount`, and `claim`. See `docs/research/tokenops-sdk-notes.md`'s "Live Sepolia Runtime Spike Result" section.
+2. ~~**Minimal distribution flow**~~ — **completed in script.** Issuer side (mint → authorize operator → fund airdrop → encrypt+sign per-recipient claim payload) works end-to-end in `scripts/spike-tokenops-sepolia.ts`. No wizard UI yet — this is the proven call sequence the wizard will wrap.
+3. ~~**Recipient decrypt flow**~~ — **completed in script.** `getClaimAmount` → `ZamaSDK.allow` → `ZamaSDK.userDecrypt` → `claim` → post-claim `confidentialBalanceOf` decrypt, proven end-to-end for one recipient with matching decrypted amounts before and after claim.
 4. **Decide if registry is needed** — per the Smart Contract Strategy section above; resolve this before any registry Solidity gets written, since it may turn out to be unnecessary.
+
+**Frontend can now be built around the proven TokenOps airdrop flow** — steps 1-3 are no longer theoretical or type-checked-only, they're demonstrated against real Sepolia state with transaction hashes as evidence. `scripts/spike-tokenops-sepolia.ts` is the canonical reference for the exact call sequence, argument shapes, and the account-object gotcha (pass full `Account` objects, not address strings, to any TokenOps write call) the wizard UI must replicate.
 5. **Wizard UI** — wrap steps 2-3 (and the registry, if built) in the Smart Distribution Wizard's six steps.
 6. **CSV import** — layer batch entry onto the wizard's recipient step once single-recipient flow is solid.
 7. **Privacy Preview** — surface the already-confirmed public/confidential model as an explicit wizard step.

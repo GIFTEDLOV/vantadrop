@@ -6,9 +6,20 @@ VantaDrop is a submission to the **Zama Developer Program — Mainnet Season 3, 
 
 ## Status
 
-**Research phase.** No app code yet. See:
+**Research + runtime spike phase. No frontend app code yet.**
 
-- [`docs/research/tokenops-sdk-notes.md`](docs/research/tokenops-sdk-notes.md) — ground-truth SDK research (versions, exports, APIs, verified against the installed package, not guessed).
+### Current Status
+
+- ✅ TokenOps runtime spike passed on Sepolia (live transactions, not a simulation).
+- ✅ Confidential airdrop create/fund passed (`createAndFundConfidentialAirdrop`).
+- ✅ Recipient decrypt-and-verify (`getClaimAmount` → decrypt) and claim both passed, with the decrypted allocation matching the admin-encrypted amount exactly.
+- ⏭️ Frontend implementation is next — see `docs/research/build-plan.md`'s Implementation Order.
+
+Full details, transaction hashes, and the account-object bug found and fixed along the way are in `docs/research/tokenops-sdk-notes.md`'s "Live Sepolia Runtime Spike Result" section. `scripts/spike-tokenops-sepolia.ts` is the canonical, proven SDK integration reference going forward.
+
+See:
+
+- [`docs/research/tokenops-sdk-notes.md`](docs/research/tokenops-sdk-notes.md) — ground-truth SDK research (versions, exports, APIs, verified against the installed package, not guessed) plus the live Sepolia spike result.
 - [`docs/research/build-plan.md`](docs/research/build-plan.md) — 4-day build plan.
 - [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) — working rules for AI agents contributing to this repo.
 
