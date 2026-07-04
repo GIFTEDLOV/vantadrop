@@ -419,3 +419,82 @@ Date: 2026-07-04. Both diagnostics above were manually run by a human, in a real
 - **Registry writes are still not wired** — `registerDistribution`/`updateStatus` were not called; the registry frontend remains read-only in practice (only `useTotalDistributions()` is live).
 
 This diagnostic result closes out the two riskiest unknowns identified earlier in this document. The next phase (wiring the real multi-step issuer flow into `/create`) is now informed by a real, positive result rather than a docs/types-only prediction.
+
+---
+
+## Issuer-side browser create flow implementation
+
+Date: 2026-07-04. This section records the wiring of the full multi-step issuer flow into `/create` — the "next phase" the diagnostic result above unblocked. **Status honesty up front: this flow is WIRED (real SDK calls behind a real button), but has NOT been run live against Sepolia by anyone yet.** The implementing session verified it only via `npm run build`, `npm run lint`, `npx hardhat test` (14 passing), `npx tsc --noEmit`, and dev-server HTTP/content checks — deliberately never connecting a wallet or clicking the execute button, because a run spends real gas and creates a real distribution. First live run is reserved for the project owner with a funded burner wallet.
+
+### What was wired, file by file
+
+| File | Change |
+|---|---|
+| `components/wizard/ExecuteStep.tsx` | **New.** The live execution panel that replaces the previous phase's static "not yet wired" panel in the wizard's Execute step. Contains the gating checklist, burner-wallet checkbox, real-value summary (token/factory/registry addresses as Etherscan links, recipient count, total), warning banner, execution state machine + visible timeline, failure panel, partial-success handling, result screen, and the copy-package / copy-instructions actions. |
+| `components/wizard/CreateWizard.tsx` | Step 4 now renders `<ExecuteStep state parsed selectedType/>`; the old static spike-recap panel (and its dead `executeNotice` state) was removed. Step 0 gained a required **public distribution title** input (needed because the registry write stores a title); step-0 `canProceed` now also requires a non-empty title. |
+| `components/wizard/types.ts` | `WizardState` gained `title: string`, documented as PUBLIC (on-chain at execution). |
+| `lib/distribution.ts` | **New.** `DistributionPackage` type + `saveDistributionPackage` / `loadDistributionPackages` localStorage helpers (key `vantadrop:distributions`, upsert by local `distributionId`). Carries the privacy framing in its header comment. |
+| `lib/registry/client.ts` | Comment-only: `writeRegisterDistribution` is no longer described as unwired (it is the flow's final step); `writeUpdateStatus` remains honestly labeled NOT WIRED. No logic changes. |
+| `lib/tokenops/issuer.ts`, `lib/tokenops/browser.ts` | Comment-only: stale "NOT WIRED" headers replaced with accurate wiring status. No logic changes. |
+| `components/IntegrationStatus.tsx` | "Full issuer execution" and "Registry frontend writes" rows now read **"Wired — awaiting live confirmation"** (deliberately NOT "Proven live" — same wired-vs-proven distinction the diagnostics went through). Recipient decrypt/claim stays "Not wired yet". |
+| `components/RecipientPortal.tsx` | Wording-only: badges/copy now say recipient decrypt/claim wiring is the next phase. Zero functional change, zero live claim button — confirmed by grep (no issuer/recipient service function or SDK write is imported there). |
+
+### The exact sequence (as implemented in `ExecuteStep.handleExecute`)
+
+1. Gates: wallet connected (`useSepoliaWallet`), chain id 11155111, recipients valid (the wizard's existing `lib/csv.ts` signal), at most 3 recipients (hard cap, see below), title+type set, burner checkbox checked.
+2. `checking-operator` — free `isOperator` read (same read the diagnostic proved).
+3. `approving-operator` — `ensureAirdropFactoryOperator(...)`, **only if step 2 said approval is needed**; the timeline step only appears in that case. (1 tx prompt.)
+4. `creating-and-funding` — `getBrowserFheBundle(...)` then `createAndFundAirdrop(...)` with the spike-proven window (opens now, +7 days, `canExtendClaimWindow: false`). (1 tx prompt; funding total encrypted in-flight.)
+5. `encrypting-allocations` — `encryptRecipientAllocations(...)` per recipient, with live `onProgress` in the timeline. Free, no prompts. **Runs after create-and-fund by necessity**: each proof is bound to (clone address, recipient address) — the clone must exist first (section 5's proven ordering).
+6. `signing-claims` — `signRecipientClaims(...)`, N EIP-712 prompts, live progress.
+7. Package saved to localStorage **before** the registry write, so a registry failure can never lose claim data.
+8. `registering-metadata` — `writeRegisterDistribution(...)` with **only** `{ token, tokenOpsAirdrop, title, useCase, recipientCount, metadataURI: "" }`. Its own try/catch (see partial failure).
+9. `completed` — result screen with tx hashes (Etherscan links), clone address, registry id, copy actions.
+
+Every TokenOps call site omits `account` (the proven browser rule; inline FOOTGUN comments restate it), and the registry write passes the full wagmi account object internally — never a bare address string.
+
+### Wallet prompts, counted precisely from the implementation
+
+For N recipients: **N + 2 prompts when the factory is already an operator, N + 3 when approval is needed.** Concretely for the 3-recipient cap: **5–6 prompts** — (0 or 1) operator-approval tx + 1 create-and-fund tx + 3 claim-signature EIP-712 prompts + 1 registry tx. Encryption adds zero prompts (relayer HTTP only). The UI states this count on the summary card before execution.
+
+### Safety cap
+
+Live execution is hard-capped at **3 recipients** this phase (`LIVE_RECIPIENT_CAP` in `ExecuteStep.tsx`). More than 3 valid recipients disables the button with an explicit warning; the list is **never silently truncated** — it still displays in full everywhere.
+
+### The localStorage distribution package
+
+Shape (see `lib/distribution.ts`): local `distributionId` (uuid), title, useCase, network/chainId, sender, token, factory, clone (`tokenOpsAirdrop`), registry address, optional `registryDistributionId`, recipientCount, per-recipient `{ wallet, note, amount, claimAuthorization, encryptedHandleSummary }`, `txHashes { operatorApproval?, createAndFund, registry? }`, createdAt.
+
+Privacy framing: this package contains plaintext recipients, amounts, notes, and claim signatures — acceptable **only because it lives in the sender's own browser localStorage**, the same trust domain as the wizard's CSV textarea (local-only, sender-side working state). The UI labels it exactly that way ("Saved to your browser's local storage — this is not on-chain and not shared with anyone"). `encryptedHandleSummary` is a shortened opaque ciphertext id + proof size, not a full claim payload — the real recipient delivery format is a next-phase decision.
+
+**Registry privacy, restated:** `VantaDropRegistry` receives only token, clone address, title, use case, recipient COUNT, and an empty metadataURI. No recipient addresses, amounts, notes, signatures, or handles — the ABI has no parameter shaped to accept them and the call site passes none (see the PRIVACY comment at the `writeRegisterDistribution` call in `ExecuteStep.tsx`; hardhat test 14 re-proves the contract surface).
+
+### Partial-failure handling
+
+- **Registry write fails after steps 2–7 succeeded:** the distribution is presented as CREATED (real clone address + create tx), with a distinct amber "Registry metadata registration failed" panel showing the real error, and the copy-package / copy-instructions actions still available — the registry is optional metadata, never the source of truth (`docs/research/registry-decision.md`). The package was already saved before the registry attempt.
+- **Failure after create-and-fund but before signing completes:** phase = failed, but the failure panel explicitly surfaces the already-created clone address and create tx, and warns that this phase has **no resume** — a retry creates and funds a NEW clone. (The `userSalt` resume hook exists in `createAndFundAirdrop` but is deliberately not wired yet.)
+- Errors are translated via the SDK's own `isTokenOpsSdkError` + stable codes (`TOKENOPS_WALLET_REJECTED`, `TOKENOPS_USER_REJECTED`, `TOKENOPS_INSUFFICIENT_GAS_FUNDS`, `TOKENOPS_INSUFFICIENT_BALANCE`, `TOKENOPS_WALLET_CHAIN_MISMATCH`, `TOKENOPS_RELAYER_UNREACHABLE`, `TOKENOPS_ENCRYPTION_FAILED`, `TOKENOPS_SIGNING_FAILED`, `TOKENOPS_NETWORK_ERROR`, `TOKENOPS_UNKNOWN_WRITE_FAILURE`), with a viem `UserRejectedRequestError` branch for the plain-viem registry write.
+
+### What remains unwired
+
+- **Recipient decrypt/claim** — `lib/tokenops/recipient.ts` is still called from nowhere; `/recipient/demo` remains the proven-spike walkthrough with no live claim button (its copy now says "next phase" explicitly).
+- **Per-distribution room page** (`/drop/[id]`) — the result screen links to `/drop/demo` clearly labeled as a demo example.
+- **`writeUpdateStatus`** and any resume-from-salt flow.
+
+### How to test manually (project owner, burner wallet)
+
+1. Fund a burner wallet with Sepolia ETH (at least ~0.05 for headroom) and confidential CTTT (faucet / `npm run spike` mint step).
+2. `npm run dev`, open `/create`, connect the burner wallet, confirm the network guard shows Sepolia.
+3. Step 0: pick a type and enter a PUBLIC title. Step 1: keep CTTT. Step 2: enter 1–3 valid recipients (over 3 keeps the button disabled). Steps 3–4: continue to Execute.
+4. Check "I am using a burner wallet…", review the summary (addresses, total, expected prompt count), click **Create confidential distribution**.
+5. Observe the timeline: operator check → (approval tx if needed) → create+fund tx → per-recipient encryption progress → N signature prompts → registry tx. Expect 5–6 wallet prompts for 3 recipients; the first encryption of the session can take a while (CDN WASM + FHE params cold start).
+6. On success: verify the clone address and tx hashes on Etherscan, check `/verification`'s registry-read row now counts 1, and inspect `localStorage["vantadrop:distributions"]` for the package.
+
+### Known risks / open items for the first live run
+
+1. **Never run live end-to-end** — the create+fund, encrypt-loop, sign-loop, and registry write have not been exercised from a browser as one sequence. The individual primitives were proven (operator write, encryption) but composition bugs are exactly what the first burner run is for.
+2. **Real cost per run**: setOperator (if needed) + createAndFundConfidentialAirdrop (FHE write, comparable to the ~310k-gas class) + registerDistribution — plus the funded tokens locked into the clone. Budget per section 8.6.
+3. **No resume**: a mid-flow failure after create-and-fund strands a funded clone; a retry funds a fresh clone. Acceptable for 3-recipient test runs; a resume flow should exist before the cap is raised.
+4. **Relayer/CDN latency and availability** (sections 8.1–8.3) now sit in a user-facing path: the create button's first run per browser includes the multi-MB FHE-params cold start inside the "creating-and-funding" step.
+5. **Prompt fatigue is real but bounded** (5–6 prompts at the cap); the UI states the expected count before execution.
+6. The hidden diagnostic page still says "the real issuer/recipient flows are not wired yet" in its safety-controls copy — that page is frozen by phase constraint ("must remain exactly as it is"), so the stale sentence is documented here instead of edited there.

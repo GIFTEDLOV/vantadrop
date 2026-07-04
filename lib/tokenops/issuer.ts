@@ -7,9 +7,12 @@
  * same SDK functions, same argument shapes, wagmi-sourced viem clients instead
  * of private-key clients.
  *
- * NOT WIRED: nothing in this file is called from any page render path or
- * click handler in the current phase. These are real, typed, compile-checked
- * implementations awaiting the wiring phase — not stubs, but also not live.
+ * WIRING STATUS: `ensureAirdropFactoryOperator` was proven live via the
+ * hidden diagnostic page (/dev/tokenops-diagnostic, tx 0x368d42…2585). As of
+ * the issuer-flow phase, all four functions are wired into the /create
+ * wizard's execute step (components/wizard/ExecuteStep.tsx), each behind an
+ * explicit user action. Wired ≠ proven live: only the operator path (and
+ * standalone encryption) has been run against real Sepolia so far.
  *
  * ========================== THE `account` FOOTGUN ==========================
  * Every TokenOps write accepts `account?: Account | Address` ("Defaults to

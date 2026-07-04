@@ -30,9 +30,14 @@ const serviceLayerPresent =
  * exact button, in a real browser, against a funded burner wallet on live
  * Sepolia, and it succeeded — see docs/research/browser-tokenops-integration.md
  * ("Live browser diagnostic result") for the real tx hash and encryption
- * output this claim is based on. It does NOT mean the full multi-step issuer
- * or recipient flows have been run — those remain separate, larger, still
- *-unwired surfaces (see the two "Not wired yet" rows below).
+ * output this claim is based on.
+ *
+ * "Wired — awaiting live confirmation" (the issuer flow and its registry
+ * write) means the real multi-step execution code now exists behind the
+ * /create wizard's execute button and can be triggered — but no human has
+ * yet run the full sequence against live Sepolia. Wired is NOT proven live;
+ * the same distinction the diagnostics went through before their first
+ * manual run. Recipient decrypt/claim remains fully unwired (next phase).
  */
 export function IntegrationStatus() {
   const totalDistributions = useTotalDistributions();
@@ -42,11 +47,13 @@ export function IntegrationStatus() {
       <h3 className="mb-1 text-sm font-semibold text-white">Integration status</h3>
       <p className="mb-3 text-[13px] text-zinc-500">
         Where the browser integration actually stands. &quot;Ready&quot; means typed
-        service functions exist and compile into this bundle. &quot;Proven live&quot; means a
-        human clicked that exact button against a funded burner wallet on live Sepolia
-        and it succeeded. The dev-only diagnostic page is still the only surface that has
-        ever sent a live transaction or run a live encryption — no production flow
-        (the wizard, the recipient portal) sends transactions yet.
+        service functions exist and compile into this bundle. &quot;Proven live&quot; means
+        a human ran that exact action against a funded burner wallet on live Sepolia and
+        it succeeded. &quot;Wired — awaiting live confirmation&quot; means the real
+        execution code is now behind the /create wizard&apos;s execute button but the full
+        sequence has not yet been run live by a human — the dev-only diagnostic page
+        remains the only surface that has actually sent a live transaction so far. The
+        recipient portal still sends nothing.
       </p>
       <KeyValueRow label="Wallet foundation">
         <Badge tone="proven">Ready</Badge>
@@ -64,13 +71,13 @@ export function IntegrationStatus() {
         <Badge tone="proven">Proven live</Badge>
       </KeyValueRow>
       <KeyValueRow label="Full issuer execution">
-        <Badge tone="pending">Not wired yet</Badge>
+        <Badge tone="pending">Wired — awaiting live confirmation</Badge>
       </KeyValueRow>
       <KeyValueRow label="Recipient decrypt/claim">
         <Badge tone="pending">Not wired yet</Badge>
       </KeyValueRow>
       <KeyValueRow label="Registry frontend writes">
-        <Badge tone="pending">Not wired yet</Badge>
+        <Badge tone="pending">Wired (issuer flow) — awaiting live confirmation</Badge>
       </KeyValueRow>
       <div className="mt-4 border-t border-white/[0.05] pt-3">
         <KeyValueRow label="Registry reads (live from this browser)">
@@ -88,8 +95,8 @@ export function IntegrationStatus() {
         <p className="mt-2 text-[12px] leading-relaxed text-zinc-600">
           This row is a real read-only call to VantaDropRegistry.totalDistributions()
           from your browser — the first live registry wiring. The proven demo airdrop
-          predates the registry frontend and was never registered, so 0 is the honest
-          count until the issuer flow is wired.
+          predates the registry frontend and was never registered, so 0 remains the
+          honest count until the now-wired issuer flow is run live for the first time.
         </p>
       </div>
     </Card>

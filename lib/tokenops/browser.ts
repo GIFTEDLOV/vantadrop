@@ -15,8 +15,10 @@
  * Every construction function therefore starts with `assertBrowser()`, a
  * real tripwire that throws before any browser-only API is touched.
  *
- * NOT WIRED: no function in this file is called from any page render path or
- * click handler in the current phase (verified in the phase's honesty pass).
+ * WIRING STATUS: `getBrowserFheBundle` is called behind explicit user actions
+ * on the hidden diagnostic page (encryption round-trip proven live there) and
+ * the /create wizard's execute step. Nothing here is ever constructed at
+ * render time — only inside click handlers.
  */
 
 import type { PublicClient, WalletClient } from "viem";

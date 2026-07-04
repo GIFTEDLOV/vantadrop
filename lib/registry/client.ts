@@ -8,9 +8,10 @@
  * token/clone addresses, title/use-case strings, a recipient COUNT, and a
  * status byte. Nothing in this file may widen that.
  *
- * Reads are free and safe from anywhere. WRITES ARE NOT WIRED to any UI in
- * this phase — `registerDistribution` / `updateStatus` exist for the future
- * issuer flow (research doc §5 step 8) but no click path calls them.
+ * Reads are free and safe from anywhere. `writeRegisterDistribution` is wired
+ * into the /create wizard's execute step (components/wizard/ExecuteStep.tsx)
+ * as the issuer flow's final step; `writeUpdateStatus` remains unwired — no
+ * click path calls it.
  */
 
 import { parseEventLogs, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
@@ -106,8 +107,8 @@ export interface RegisterDistributionArgs {
 }
 
 /**
- * Register a distribution's public metadata (NOT WIRED to any UI yet).
- * One wallet tx prompt. Waits for the receipt and parses the new id from the
+ * Register a distribution's public metadata (wired into the /create execute
+ * flow). One wallet tx prompt. Waits for the receipt and parses the new id from the
  * DistributionRegistered event, mirroring how the TokenOps SDK returns
  * receipt-parsed results.
  *

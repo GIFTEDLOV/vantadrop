@@ -56,6 +56,12 @@ export const DISTRIBUTION_TYPES: DistributionType[] = [
 
 export interface WizardState {
   typeId: string | null;
+  /**
+   * PUBLIC distribution title — written on-chain to VantaDropRegistry at
+   * execution, so it must never contain recipient names or amounts. The UI
+   * says so next to the input.
+   */
+  title: string;
   tokenAddress: string;
   csvText: string;
 }

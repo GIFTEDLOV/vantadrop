@@ -2,21 +2,11 @@
 
 import { useMemo, useState } from "react";
 import { isAddress } from "viem";
-import {
-  CTTT_DECIMALS,
-  CTTT_SYMBOL,
-  CTTT_TOKEN_ADDRESS,
-  TX,
-  TOKENOPS_SDK_VERSION,
-  ZAMA_SDK_VERSION,
-  etherscanTx,
-  shortHex,
-} from "../../lib/constants";
-import { formatRawUnits } from "../../lib/csv";
+import { CTTT_DECIMALS, CTTT_TOKEN_ADDRESS } from "../../lib/constants";
 import { Badge, Card } from "../ui";
 import { PrivacyModel } from "../PrivacyModel";
-import { useSepoliaWallet } from "../wallet/hooks";
 import { WalletStatusBar } from "../wallet/WalletStatusBar";
+import { ExecuteStep } from "./ExecuteStep";
 import { RecipientsStep, useCsvParse } from "./RecipientsStep";
 import { DISTRIBUTION_TYPES, WIZARD_STEPS, type WizardState } from "./types";
 
@@ -24,25 +14,22 @@ export function CreateWizard() {
   const [step, setStep] = useState(0);
   const [state, setState] = useState<WizardState>({
     typeId: null,
+    title: "",
     tokenAddress: CTTT_TOKEN_ADDRESS,
     csvText: "",
   });
   const [copied, setCopied] = useState(false);
-  const [executeNotice, setExecuteNotice] = useState(false);
 
-  const wallet = useSepoliaWallet();
   const parsed = useCsvParse(state.csvText);
   const tokenValid = isAddress(state.tokenAddress.trim(), { strict: false });
   const selectedType = DISTRIBUTION_TYPES.find((t) => t.id === state.typeId) ?? null;
 
-  // Same validity signal the Recipients step gate uses — no separate validation path.
-  const recipientsValid = parsed.validCount >= 1 && parsed.errorCount === 0;
-  const executeReady = wallet.isConnected && wallet.isOnSepolia && recipientsValid;
-
   const canProceed = useMemo(() => {
     switch (step) {
       case 0:
-        return state.typeId !== null;
+        // Title is required here because it becomes the PUBLIC on-chain
+        // registry title at execution (ExecuteStep step 9).
+        return state.typeId !== null && state.title.trim().length > 0;
       case 1:
         return tokenValid;
       case 2:
@@ -50,7 +37,7 @@ export function CreateWizard() {
       default:
         return true;
     }
-  }, [step, state.typeId, tokenValid, parsed.validCount, parsed.errorCount]);
+  }, [step, state.typeId, state.title, tokenValid, parsed.validCount, parsed.errorCount]);
 
   const shareLink = "/recipient/demo";
 
@@ -75,13 +62,16 @@ export function CreateWizard() {
         <Badge tone="neutral">Sepolia</Badge>
       </div>
       <p className="mb-6 text-sm text-zinc-500">
-        Six steps. Recipient data stays in your browser until execution.
+        Six steps. Recipient data stays in your browser — at execution only encrypted
+        handles and public metadata go on-chain.
       </p>
 
-      {/* ---------------- Wallet + network status (visible throughout) ---------------- */}
-      <div className="mb-8">
-        <WalletStatusBar />
-      </div>
+      {/* Wallet + network status (ExecuteStep renders its own copy on step 4) */}
+      {step !== 4 && (
+        <div className="mb-8">
+          <WalletStatusBar />
+        </div>
+      )}
 
       {/* ---------------- Stepper ---------------- */}
       <ol className="mb-10 flex flex-wrap items-center gap-2">
@@ -150,6 +140,28 @@ export function CreateWizard() {
                 );
               })}
             </div>
+            <Card className="p-5">
+              <label
+                htmlFor="distribution-title"
+                className="mb-2 block text-xs font-medium uppercase tracking-wider text-zinc-500"
+              >
+                Distribution title
+              </label>
+              <input
+                id="distribution-title"
+                value={state.title}
+                onChange={(e) => setState((s) => ({ ...s, title: e.target.value }))}
+                placeholder="e.g. Genesis contributor round"
+                maxLength={120}
+                className="w-full rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-[14px] text-zinc-200 placeholder:text-zinc-600 focus:border-violet-500/50 focus:outline-none"
+              />
+              <p className="mt-2 text-[13px] leading-relaxed text-zinc-500">
+                <span className="text-amber-300/90">Public:</span> the title and the
+                distribution type above are written on-chain to VantaDropRegistry at
+                execution. Do not put recipient names or amounts in the title —
+                recipients and amounts never go on-chain.
+              </p>
+            </Card>
           </div>
         )}
 
@@ -232,174 +244,10 @@ export function CreateWizard() {
         )}
 
         {step === 4 && (
-          <div className="space-y-5">
-            <div>
-              <h2 className="text-lg font-semibold text-white">Execute distribution</h2>
-              <p className="mt-1 text-sm text-zinc-500">Summary of what will be executed.</p>
-            </div>
-
-            <Card className="p-5">
-              <dl className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <dt className="text-xs uppercase tracking-wider text-zinc-500">Type</dt>
-                  <dd className="mt-1 text-sm text-zinc-200">
-                    {selectedType ? `${selectedType.icon} ${selectedType.label}` : "—"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wider text-zinc-500">Token</dt>
-                  <dd className="mt-1 font-mono text-sm text-zinc-200">
-                    {shortHex(state.tokenAddress.trim())}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wider text-zinc-500">Recipients</dt>
-                  <dd className="mt-1 text-sm text-zinc-200">{parsed.validCount}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wider text-zinc-500">
-                    Total (encrypted at execution)
-                  </dt>
-                  <dd className="mt-1 text-sm text-zinc-200">
-                    {formatRawUnits(BigInt(parsed.totalRaw), CTTT_DECIMALS)} {CTTT_SYMBOL}
-                  </dd>
-                </div>
-              </dl>
-            </Card>
-
-            {/* -------- Execution readiness checklist (real, checked conditions) -------- */}
-            <Card className="p-5">
-              <h3 className="text-sm font-semibold text-white">Execution readiness</h3>
-              <p className="mt-1 text-[13px] text-zinc-500">
-                Three real preconditions, checked live. Meeting all three prepares this step
-                for the next phase — it does not make execution available yet.
-              </p>
-              <ul className="mt-4 space-y-2.5">
-                {[
-                  {
-                    ok: wallet.isConnected,
-                    label: "Wallet connected",
-                    missing: "Connect a browser wallet using the panel above.",
-                  },
-                  {
-                    ok: wallet.isOnSepolia,
-                    label: "Sepolia network selected",
-                    missing: wallet.isConnected
-                      ? "Switch your wallet to Sepolia using the panel above."
-                      : "Requires a connected wallet first.",
-                  },
-                  {
-                    ok: recipientsValid,
-                    label: `Recipients valid (${parsed.validCount} valid, ${parsed.errorCount} error${parsed.errorCount === 1 ? "" : "s"})`,
-                    missing: "Go back to the Recipients step and fix the CSV.",
-                  },
-                ].map((check) => (
-                  <li key={check.label} className="flex items-start gap-2.5 text-[13px]">
-                    <span
-                      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border font-mono text-[10px] ${
-                        check.ok
-                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                          : "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                      }`}
-                    >
-                      {check.ok ? "✓" : "!"}
-                    </span>
-                    <span className={check.ok ? "text-zinc-300" : "text-zinc-400"}>
-                      {check.label}
-                      {!check.ok && (
-                        <span className="ml-2 text-amber-300/90">— {check.missing}</span>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-5 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  disabled={!executeReady}
-                  onClick={() => setExecuteNotice(true)}
-                  className="rounded-lg bg-gradient-to-r from-violet-500 to-indigo-600 px-6 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Execute distribution
-                </button>
-                <Badge tone="pending">Not yet wired — next phase</Badge>
-              </div>
-              {executeNotice && (
-                <p className="mt-3 text-[13px] leading-relaxed text-amber-300">
-                  No transaction was sent. Browser TokenOps execution is the next phase.
-                  Sepolia flow is already proven in scripts/spike-tokenops-sepolia.ts.
-                </p>
-              )}
-            </Card>
-
-            <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.05] p-6">
-              <div className="flex items-center gap-3">
-                <Badge tone="pending">Browser TokenOps execution pending</Badge>
-              </div>
-              <p className="mt-3 text-sm leading-relaxed text-zinc-300">
-                This wizard does not yet submit transactions from a browser wallet — and it will
-                not pretend to. The full Sepolia flow this button will drive is already{" "}
-                <span className="font-medium text-emerald-300">proven end-to-end</span> in{" "}
-                <code className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-[12px] text-zinc-200">
-                  scripts/spike-tokenops-sepolia.ts
-                </code>{" "}
-                using {TOKENOPS_SDK_VERSION} + {ZAMA_SDK_VERSION}:
-              </p>
-              <ul className="mt-4 space-y-2 text-[13px] text-zinc-400">
-                <li className="flex items-center justify-between gap-4">
-                  <span>1. Mint confidential CTTT via testnet faucet</span>
-                  <a
-                    className="font-mono text-emerald-300/90 underline decoration-emerald-500/30 underline-offset-4 hover:text-emerald-200"
-                    href={etherscanTx(TX.mintConfidential)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {shortHex(TX.mintConfidential)}
-                  </a>
-                </li>
-                <li className="flex items-center justify-between gap-4">
-                  <span>2. Create + fund confidential airdrop (encrypted funding amount)</span>
-                  <a
-                    className="font-mono text-emerald-300/90 underline decoration-emerald-500/30 underline-offset-4 hover:text-emerald-200"
-                    href={etherscanTx(TX.createAndFundConfidentialAirdrop)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {shortHex(TX.createAndFundConfidentialAirdrop)}
-                  </a>
-                </li>
-                <li className="flex items-center justify-between gap-4">
-                  <span>3. Recipient decrypt-access grant (getClaimAmount)</span>
-                  <a
-                    className="font-mono text-emerald-300/90 underline decoration-emerald-500/30 underline-offset-4 hover:text-emerald-200"
-                    href={etherscanTx(TX.getClaimAmount)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {shortHex(TX.getClaimAmount)}
-                  </a>
-                </li>
-                <li className="flex items-center justify-between gap-4">
-                  <span>4. Recipient claim (confidential transfer)</span>
-                  <a
-                    className="font-mono text-emerald-300/90 underline decoration-emerald-500/30 underline-offset-4 hover:text-emerald-200"
-                    href={etherscanTx(TX.claim)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {shortHex(TX.claim)}
-                  </a>
-                </li>
-              </ul>
-              <p className="mt-4 text-[13px] leading-relaxed text-zinc-500">
-                Browser TokenOps execution is the next phase. Sepolia flow is already proven in
-                scripts/spike-tokenops-sepolia.ts. A connected Sepolia wallet and valid
-                recipients satisfy this page&apos;s checks, but do not mean the not-yet-wired
-                TokenOps call would succeed — nothing on this page fabricates a transaction
-                result.
-              </p>
-            </div>
-          </div>
+          // Live issuer flow — real Sepolia transactions. All gating,
+          // warnings, the burner checkbox, the execution timeline, and the
+          // result screen live in ExecuteStep.
+          <ExecuteStep state={state} parsed={parsed} selectedType={selectedType} />
         )}
 
         {step === 5 && (

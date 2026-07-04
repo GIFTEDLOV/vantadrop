@@ -18,7 +18,10 @@ import { WalletStatusBar } from "./wallet/WalletStatusBar";
  * Demo recipient portal.
  *
  * HONESTY CONTRACT: wallet connection and Sepolia network detection are now
- * live in this UI — but no transaction is sent from this page. Every stage
+ * live in this UI — but no transaction is sent from this page. The issuer-side
+ * create flow is now wired in /create; recipient browser decrypt/claim wiring
+ * (this page's live version) is the NEXT phase — there is deliberately no
+ * live claim button here. Every stage
  * shows two things, clearly separated:
  *   1. what the live flow will do once browser TokenOps execution lands, and
  *   2. what the proven Sepolia spike (scripts/spike-tokenops-sepolia.ts)
@@ -62,8 +65,9 @@ export function RecipientPortal() {
             <NetworkGuard />
             {wallet.isConnected && (
               <p className="text-[13px] text-zinc-500">
-                Connected — detection only. Eligibility checks, decryption, and claiming from
-                this browser are still pending TokenOps execution wiring.
+                Connected — detection only. Recipient browser decrypt/claim wiring is the
+                next phase: eligibility checks, decryption, and claiming still cannot be
+                performed from this page.
               </p>
             )}
           </div>
@@ -188,7 +192,7 @@ export function RecipientPortal() {
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone="demo">Demo UI — based on proven Sepolia spike</Badge>
         <Badge tone="neutral">Wallet connect live</Badge>
-        <Badge tone="pending">Browser TokenOps execution pending</Badge>
+        <Badge tone="pending">Recipient decrypt/claim wiring — next phase</Badge>
       </div>
       <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white">
         Recipient portal
