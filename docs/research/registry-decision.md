@@ -143,3 +143,17 @@ contract VantaDropRegistry {
 - **Status validation:** implemented as an unvalidated `uint8` (no `Status` enum in the final contract — kept even simpler than the original proposal, since the frontend/template layer, not the contract, owns the meaning of status codes; this avoids the contract needing to be upgraded every time a new status is introduced). Revisit only if silently-invalid status values become an observed problem.
 - **`getSenderDistributions` unbounded array:** shipped as-is (view/`eth_call`-only, no gas cost to the caller). Not a concern at the scale this project operates at.
 - **Test coverage:** 14/14 tests passing, including a structural test that inspects the compiled ABI to assert no function or `Distribution` struct field name could plausibly hold a recipient list or allocation amount — a codified, automatically-checked version of the privacy rule, not just a comment.
+
+## Deployment result
+
+| Field | Value |
+|---|---|
+| Network | Ethereum Sepolia (chain id `11155111`) |
+| Registry address | `0x2a3dd1dff5c121b1fc24c7412e519c075bc5f8a1` |
+| Deployer | `0x3773537741fADe12d2081e7602d56Bc003b69C60` (the same sender/admin burner wallet proven in the TokenOps runtime spike) |
+| Deployment tx hash | `0xf60cb789dc0119a9ea69fe267871788d68b0d47014c7b342356ed6f236a49c0c` (block `11198203`) |
+| Date | 2026-07-04 |
+
+Deployed via `npx hardhat run scripts/deployRegistry.ts --network sepolia`, using the `sepolia` network entry added to `hardhat.config.ts` (`configVariable("SEPOLIA_RPC_URL")` / `configVariable("SENDER_PRIVATE_KEY")`, resolved from `.env.local` — the same burner wallet and RPC endpoint already used by `scripts/spike-tokenops-sepolia.ts`). Deployer balance before/after: `0.048367879731593661` → `0.044766391898490211` ETH (~0.0036 ETH spent).
+
+Contract source verification on Etherscan has not been done yet but is possible later — the contract has no constructor arguments, no external dependencies, and a single flat `.sol` file, so verification (`hardhat-verify`, already bundled in the toolbox) should be a single straightforward command whenever it's wanted; not required for the registry to function.
