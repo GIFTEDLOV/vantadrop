@@ -282,3 +282,58 @@ Not needed: changes to `next.config.ts`, `transpilePackages`, custom headers, `p
 4. **`getClaimAmount` after `claim`** — still untested (inherited open item from `tokenops-sdk-notes.md`); the planned flows sidestep it by using `confidentialBalanceOf` for post-claim verification, which the spike proved.
 5. **TokenOps React hooks' runtime behavior unverified** — their `.d.ts` surface was read in full, but no hook was mounted. Irrelevant while the recommendation is direct client usage; re-verify before ever adopting the write-path hooks.
 6. **`createSepoliaEncryptorWeb` internals** — its TSDoc guarantees browser-safe imports and the build test bundling `@tokenops/sdk/fhe` (which re-exports it) succeeded, but its runtime behavior (worker boot, relayer handshake) is untested until the implementation phase, same as `RelayerWeb` itself.
+
+---
+
+## Service layer implementation checkpoint
+
+Date: 2026-07-04 (same day as the research above; implementation phase). This section records what the "next phase" rows in the table above actually became.
+
+### Files created this phase
+
+| File | Contents |
+|---|---|
+| `lib/tokenops/browser.ts` | Real browser client construction: `assertBrowser()` SSR tripwire, `isBrowserRuntime()`, `createBrowserEncryptor()` (wraps `createSepoliaEncryptorWeb`), `createBrowserRelayer()` (`RelayerWeb` + `SepoliaConfig`, optional `NEXT_PUBLIC_SEPOLIA_RPC_URL` override), and `getBrowserFheBundle()` → `{ zama, relayer, encryptor, terminate }` memoized per (address, chainId) with stale-worker `terminate()` on wallet switch. `indexedDBStorage`, not `memoryStorage`. The `encryptor: Encryptor = relayer` line is a deliberate typed assignment so the compiler re-proves the 3.0.0 Encryptor compatibility on every build. |
+| `lib/tokenops/issuer.ts` | `ensureAirdropFactoryOperator` (isOperator pre-check → `setOperator`), `encryptRecipientAllocations` (per-recipient `encryptUint64` loop, recipient-bound proofs, progress callback), `createAndFundAirdrop` (`createAndFundConfidentialAirdrop`, fresh `userSalt` per run, resume support), `signRecipientClaims` (`signClaimAuthorization` loop). |
+| `lib/tokenops/recipient.ts` | `createAirdropClient`, `checkRecipientEligibility` (`preflightClaim` + `isSignatureValid` + `gasFee` prefetch), `grantDecryptAccess` (`getClaimAmount` — paid ACL-grant write BEFORE claim, does not consume it), `decryptAllocationHandle` (`zama.allow` + `zama.userDecrypt`), `claimAllocation` (`claim`), `verifyPostClaimBalance` (`createToken().balanceOf` decrypt). |
+| `lib/registry/client.ts` | viem wrappers over `vantaDropRegistryAbi`: `readDistribution`, `readSenderDistributions`, `readTotalDistributions`, `writeRegisterDistribution` (waits receipt, parses `DistributionRegistered` → id), `writeUpdateStatus`; `DISTRIBUTION_STATUS` frontend convention for the opaque uint8. |
+| `lib/registry/hooks.ts` | Read-only wagmi hooks: `useDistribution(id)`, `useSenderDistributions(addr)`, `useTotalDistributions()`. Write hooks deliberately not provided — writes stay as unwired callables in `client.ts`. |
+| `components/IntegrationStatus.tsx` | Honest six-line status panel on `/verification` + the one piece of live wiring this phase allows: a real read-only `totalDistributions()` call from the browser via `useTotalDistributions()`. |
+
+`lib/tokenops/browser-plan.ts` (the type-only planning stub from the research phase) was **deleted** — its interfaces (`BrowserFheBundle`, `BrowserFheBundleInputs`) and all of its implementation notes now live, implemented, in `lib/tokenops/browser.ts`. Keeping both would have left two overlapping sources of truth for the same shape.
+
+### Resulting architecture
+
+```
+components/wallet/hooks.ts (useSepoliaWallet — readiness signal, unchanged)
+        │ gates (future wiring)
+        ▼
+lib/tokenops/browser.ts ── getBrowserFheBundle(publicClient, walletClient)
+        │  { zama, relayer, encryptor }          (from wagmi usePublicClient / useWalletClient)
+        ├──▶ lib/tokenops/issuer.ts    — consumes `encryptor` + viem clients; future CreateWizard execute step
+        ├──▶ lib/tokenops/recipient.ts — consumes `zama` + viem clients; future RecipientPortal live stages
+        └──  (encryptor route B: createBrowserEncryptor, standalone, kept for parity with TokenOps' own helper)
+
+lib/registry/abi.ts (inert, unchanged)
+        ├──▶ lib/registry/client.ts — plain viem read/write callables (writes unwired)
+        └──▶ lib/registry/hooks.ts  — read-only wagmi hooks
+                    └──▶ components/IntegrationStatus.tsx (live totalDistributions read — wired, read-only)
+```
+
+The wizard (`components/wizard/CreateWizard.tsx`) and recipient portal (`components/RecipientPortal.tsx`) were intentionally **not** modified except that nothing changed at all — their gating and "not yet wired" labeling is exactly as before. `components/IntegrationStatus.tsx` imports one function from each service module and renders `typeof f === "function"` — nothing is invoked, but every `npm run build` now re-proves empirically that the full SDK module graph bundles and survives static prerender (this replaces the research phase's throwaway `SdkBundleProbe`, as a permanent, honest fixture instead of a reverted experiment).
+
+Live-state fact checked this phase: `totalDistributions()` on the deployed registry reads **0** (verified with a real Sepolia read) — the proven demo airdrop was never registered in `VantaDropRegistry`; it predates the registry frontend. The UI says so rather than fabricating a registry entry for the demo.
+
+### Why UI transaction buttons are still disabled
+
+Phase constraint, restated for the next reader: **no live browser transaction wiring was permitted this phase.** The service functions may contain real SDK calls (they do), but none is reachable from any render path or onClick handler — `/create`'s execute button still shows the honest "not yet wired" notice, `/recipient/demo` still walks through spike-proven facts only. Two reasons beyond process: (1) the omit-`account` browser write path is still empirically unproven (§3 / open question 1) and must be confirmed with a burner wallet on a fresh clone before any user-facing button relies on it; (2) the existing demo clone's only claim signature is consumed, so a live recipient demo needs a fresh distribution first (§8.5).
+
+### What the next phase should wire first (recommendation)
+
+Wire the cheapest, most isolated write first, behind a dev-only manual trigger (not a product button):
+
+1. **`ensureAirdropFactoryOperator` + one `encryptRecipientAllocations` call** from a connected burner wallet on `/verification` (dev-gated). This empirically confirms, in one cheap step, the two riskiest unknowns: the omit-`account` injected-wallet write path (open question 1) and the `RelayerWeb` cold-start/CDN/encrypt round trip (open question 6) — without deploying anything or consuming anything.
+2. Then the **full issuer flow** in the wizard execute step (`getBrowserFheBundle` → operator → `createAndFundAirdrop` → encrypt loop → `signRecipientClaims` → `writeRegisterDistribution`), which also mints the fresh clone + fresh authorization that…
+3. …the **recipient flow** (`checkRecipientEligibility` → `grantDecryptAccess` → `decryptAllocationHandle` → `claimAllocation` → `verifyPostClaimBalance`) needs, since the existing demo clone's signature is already consumed.
+
+Registry writes ride along with step 2 (`writeRegisterDistribution` is the issuer flow's final step); `writeUpdateStatus` can stay unwired until a distribution-management view exists.

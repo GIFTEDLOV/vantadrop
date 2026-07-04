@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { IntegrationStatus } from "../../components/IntegrationStatus";
 import { Badge, SectionLabel } from "../../components/ui";
 import { VerificationPanel } from "../../components/VerificationPanel";
 import { WalletReadiness } from "../../components/wallet/WalletReadiness";
@@ -34,6 +35,10 @@ export default function VerificationPage() {
 
       <div className="mt-10">
         <WalletReadiness />
+      </div>
+
+      <div className="mt-4">
+        <IntegrationStatus />
       </div>
 
       <div className="mt-4">
