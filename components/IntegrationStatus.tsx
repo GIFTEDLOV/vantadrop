@@ -21,10 +21,16 @@ const serviceLayerPresent =
 /**
  * Honest integration status of the browser stack, phase by phase.
  *
- * "Prepared" means exactly this: real, typed service functions exist and are
- * shipped in this bundle (checked above via real imports) — it does NOT mean
- * they have been exercised against a live wallet transaction. No line here
- * may claim more than the code actually does.
+ * "Ready" for the service layer means exactly this: real, typed service
+ * functions exist and are shipped in this bundle (checked above via real
+ * imports) — it does NOT mean every function has been exercised against a
+ * live wallet transaction.
+ *
+ * "Added" for the two diagnostics means exactly this: the hidden dev-only
+ * page (/dev/tokenops-diagnostic) exists and its buttons perform real SDK
+ * calls when a developer manually triggers them with a burner wallet — it
+ * does NOT mean those buttons have been run successfully against live
+ * Sepolia yet. No line here may claim more than the code actually does.
  */
 export function IntegrationStatus() {
   const totalDistributions = useTotalDistributions();
@@ -33,9 +39,12 @@ export function IntegrationStatus() {
     <Card className="p-6">
       <h3 className="mb-1 text-sm font-semibold text-white">Integration status</h3>
       <p className="mb-3 text-[13px] text-zinc-500">
-        Where the browser integration actually stands. &quot;Prepared&quot; means typed
-        service functions exist and compile into this bundle — not that they have been
-        run against a live wallet. No transaction button in this app is live yet.
+        Where the browser integration actually stands. &quot;Ready&quot; means typed
+        service functions exist and compile into this bundle. &quot;Added&quot; means the
+        hidden dev diagnostic page exists and is wired for manual testing — its buttons
+        make real calls when a developer clicks them, but they have not been run against
+        a live wallet yet. The only live transaction surface is that dev-only diagnostic;
+        no production flow sends transactions yet.
       </p>
       <KeyValueRow label="Wallet foundation">
         <Badge tone="proven">Ready</Badge>
@@ -43,16 +52,19 @@ export function IntegrationStatus() {
       <KeyValueRow label="Sepolia guard">
         <Badge tone="proven">Ready</Badge>
       </KeyValueRow>
-      <KeyValueRow label="Browser TokenOps service layer">
-        <Badge tone="demo">{serviceLayerPresent ? "Prepared" : "Missing"}</Badge>
+      <KeyValueRow label="Browser service layer">
+        <Badge tone="proven">{serviceLayerPresent ? "Ready" : "Missing"}</Badge>
       </KeyValueRow>
-      <KeyValueRow label="Live issuer execution">
+      <KeyValueRow label="Browser operator diagnostic">
+        <Badge tone="demo">Added</Badge>
+      </KeyValueRow>
+      <KeyValueRow label="Browser encryption diagnostic">
+        <Badge tone="demo">Added</Badge>
+      </KeyValueRow>
+      <KeyValueRow label="Full issuer execution">
         <Badge tone="pending">Not wired yet</Badge>
       </KeyValueRow>
-      <KeyValueRow label="Live recipient decrypt/claim">
-        <Badge tone="pending">Not wired yet</Badge>
-      </KeyValueRow>
-      <KeyValueRow label="Registry frontend writes">
+      <KeyValueRow label="Recipient decrypt/claim">
         <Badge tone="pending">Not wired yet</Badge>
       </KeyValueRow>
       <div className="mt-4 border-t border-white/[0.05] pt-3">

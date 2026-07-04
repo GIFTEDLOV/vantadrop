@@ -337,3 +337,54 @@ Wire the cheapest, most isolated write first, behind a dev-only manual trigger (
 3. …the **recipient flow** (`checkRecipientEligibility` → `grantDecryptAccess` → `decryptAllocationHandle` → `claimAllocation` → `verifyPostClaimBalance`) needs, since the existing demo clone's signature is already consumed.
 
 Registry writes ride along with step 2 (`writeRegisterDistribution` is the issuer flow's final step); `writeUpdateStatus` can stay unwired until a distribution-management view exists.
+
+---
+
+## Live browser diagnostic plan/checkpoint
+
+Date: 2026-07-04. This section records the concrete implementation of the recommendation directly above ("wire the cheapest, most isolated write first, behind a dev-only manual trigger").
+
+### The route
+
+**`app/dev/tokenops-diagnostic/page.tsx`** — a hidden, `"use client"` route at `/dev/tokenops-diagnostic`. Deliberately not linked from the landing page, the header nav in `app/layout.tsx`, or any production surface; you have to know the URL. It carries a prominent burner-wallet warning banner and a safety checkbox ("I am using a burner wallet") that hard-disables both action buttons (real `disabled` attribute + a second refusal check inside each click handler) until acknowledged.
+
+### What it tests (exactly two things)
+
+1. **Operator approval** (Section 2 of the page):
+   - "Check TokenOps operator approval" — a free `publicClient.readContract` of `isOperator(connectedWallet, TOKENOPS_AIRDROP_FACTORY)` on the CTTT token via `erc7984OperatorAbi` (the same read `ensureAirdropFactoryOperator` performs internally). Three result states: Already approved / Approval needed / Error (real message shown).
+   - "Approve TokenOps operator" — calls the real `ensureAirdropFactoryOperator({ publicClient, walletClient, token: CTTT_TOKEN_ADDRESS })` from `lib/tokenops/issuer.ts` (which omits `account` on the `setOperator` write — the browser write-path rule from §3). The button is only enabled after a check has run AND returned "Approval needed"; the click handler additionally refuses in code if the last known state was anything else, so a redundant transaction cannot be sent even if the disabled attribute were bypassed. On success it shows the real tx hash as an Etherscan link (`setOperator` waits for the receipt by default, so a returned hash is a mined tx) and then re-runs the free `isOperator` read to display on-chain truth rather than assuming.
+2. **Browser encryption round-trip** (Section 3):
+   - "Run browser encryption test" — constructs the real bundle via `getBrowserFheBundle({ publicClient, walletClient })` from `lib/tokenops/browser.ts` (RelayerWeb worker, cdn.zama.org WASM fetch, testnet relayer) and runs one real `encryptUint64({ encryptor, contractAddress: CTTT_TOKEN_ADDRESS, userAddress: connectedWallet, value: 1_000_000n })`. Since no airdrop clone exists in this diagnostic, the proof is bound to (CTTT token, connected wallet) — a legitimate binding for a pure pipeline test whose ciphertext is never sent anywhere. On success it shows the opaque handle (`bytes32` hex — a ciphertext id, safe to display) and the input-proof byte length (raw proof bytes never dumped). The test value is a hardcoded public constant, not a real allocation.
+
+Errors are surfaced as real error messages (first line) in every state machine — there is no code path that renders success without the underlying SDK call resolving.
+
+### What it explicitly does NOT test
+
+- No airdrop creation or funding — `createAndFundConfidentialAirdrop` / `createAndFundAirdrop` is not imported or called by the page.
+- No claim, no `getClaimAmount`, no recipient decrypt (`allow`/`userDecrypt` never invoked).
+- No registry writes (no `registerDistribution`/`updateStatus` anywhere in the UI).
+- No claim-authorization signing.
+- Nothing auto-runs on page load or state change — every call is behind an explicit click.
+
+### Why this before the full wizard
+
+It isolates the two riskiest unknowns (open questions 1 and 6 above) into two cheap, reversible, individually-triggered actions:
+
+- The **omit-`account` injected-wallet write path** is proven (or falsified) by a single `setOperator` transaction — the cheapest possible TokenOps write, harmless to re-run, and revocable via `revokeOperator` if desired.
+- **`RelayerWeb`'s real relayer round-trip** (worker boot, CDN WASM integrity fetch, ZK-proof generation, testnet relayer HTTP) is proven by one free encryption with no on-chain side effects at all.
+
+Wiring the full `/create` wizard first would commit a multi-step, partially-irreversible flow (create+fund locks tokens into a clone) on top of two primitives neither of which had ever been exercised from an injected wallet. If either primitive fails, the diagnostic fails in isolation with a real error message instead of stranding a half-created distribution.
+
+### What "success" means, concretely, per button
+
+- **Check**: returns a clear "Already approved" or "Approval needed" state from a real `isOperator` read (an error state with the real RPC message counts as a diagnostic result, not success).
+- **Approve**: either the code-level no-op refusal ("already approved — no transaction sent"), or a real, confirmed `setOperator` tx hash rendered as an Etherscan link, followed by the re-read flipping the check state to "Already approved". This is the empirical confirmation gate for open question 1 (the omit-`account` browser write path).
+- **Encryption test**: a real `bytes32` handle plus a nonzero input-proof byte length, with no error — proving worker boot, CDN fetch, and the relayer proof round-trip end-to-end in the browser. This closes open question 6 for `RelayerWeb` (the `createSepoliaEncryptorWeb` variant shares the same underlying pipeline).
+
+### Status honesty
+
+As of this checkpoint the page **exists and compiles/builds/renders (verified via `npm run build` and a dev-server HTTP check of the route)** but **no button has been clicked against live Sepolia** — that step deliberately requires a human with a funded burner wallet. `components/IntegrationStatus.tsx` on `/verification` states the same: the two diagnostic lines read "Added" (exists, wired for manual testing), not "Proven".
+
+### Next phase (after a human confirms both diagnostics)
+
+Once both buttons have been manually run against a funded burner wallet and both succeed (confirmed operator tx hash + real encryption handle), open questions 1 and 6 are closed empirically, and the next phase is wiring the real multi-step issuer flow into `/create` (§5 sequence: bundle → operator → `createAndFundAirdrop` → per-recipient encrypt loop → `signRecipientClaims` → `writeRegisterDistribution`), informed by whatever the diagnostic taught (actual wallet-prompt UX, relayer cold-start latency, any error shapes seen). If either diagnostic fails, fix that primitive first — the wizard wiring stays blocked until both pass.
