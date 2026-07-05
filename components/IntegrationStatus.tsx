@@ -48,14 +48,21 @@ const serviceLayerPresent =
  * matched: 5 CTTT). See docs/research/browser-tokenops-integration.md ("Live
  * browser recipient decrypt/claim result") for the real tx hashes.
  *
- * IMPORTANT DISTINCTION — "proven live" here means the underlying primitives
- * work end-to-end, proven via the hidden dev diagnostics. The public
- * recipient portal (/recipient/demo) now has the diagnostic's proven service
- * functions wired behind real, productized buttons ("Wired — ready for live
- * testing" below) — but that specific page's UI has NOT itself been run live
- * against a wallet yet. Same "wired ≠ proven live" bar every prior phase
- * used: it becomes "proven live" only after a human clicks through it on
- * Sepolia.
+ * "Proven live" for the public recipient portal means a human ran
+ * /recipient/demo itself — the productized product page, not the hidden
+ * diagnostic — end-to-end against a funded recipient burner wallet on live
+ * Sepolia: package import, eligibility check, getClaimAmount, decrypt, claim,
+ * and post-claim balance verify all succeeded with real tx hashes and no
+ * errors. See docs/research/browser-tokenops-integration.md ("Public
+ * recipient portal live test result") for the real tx hashes and the note
+ * on why the post-claim balance read 10 CTTT (this wallet's second claim
+ * across two distributions), not 5.
+ *
+ * With both the issuer flow (/create) and the recipient flow (/recipient/demo)
+ * now proven live on their actual public pages — not only via hidden
+ * diagnostics — the full confidential-distribution app flow is proven live
+ * on Sepolia end-to-end. Final UI polish and demo packaging are next; no
+ * further functional proof is outstanding for the core lifecycle.
  */
 export function IntegrationStatus() {
   const totalDistributions = useTotalDistributions();
@@ -67,12 +74,13 @@ export function IntegrationStatus() {
         Where the browser integration actually stands. &quot;Ready&quot; means typed
         service functions exist and compile into this bundle. &quot;Proven live&quot; means
         a human ran that exact action against a funded burner wallet on live Sepolia and
-        it succeeded. Both the full issuer create flow and the recipient decrypt/claim
-        flow have been run live end-to-end via hidden developer diagnostics — see the
-        research doc for tx hashes. The public recipient portal (/recipient/demo) now
-        wires those same proven recipient service functions behind productized buttons
-        (&quot;Wired&quot;), but that page&apos;s own UI has not yet been exercised live —
-        wired is not proven.
+        it succeeded. The full issuer create flow and the recipient decrypt/claim flow
+        have both now been run live end-to-end on their actual public pages —
+        <code className="mx-1 rounded bg-white/5 px-1 py-0.5 text-[12px]">/create</code>
+        and
+        <code className="mx-1 rounded bg-white/5 px-1 py-0.5 text-[12px]">/recipient/demo</code>
+        — not only via hidden developer diagnostics. The full app flow is proven live
+        on Sepolia; final UI polish and demo packaging are next.
       </p>
       <KeyValueRow label="Wallet foundation">
         <Badge tone="proven">Ready</Badge>
@@ -96,7 +104,7 @@ export function IntegrationStatus() {
         <Badge tone="proven">Proven live</Badge>
       </KeyValueRow>
       <KeyValueRow label="Public recipient portal (/recipient/demo)">
-        <Badge tone="pending">Wired — ready for live testing</Badge>
+        <Badge tone="proven">Proven live</Badge>
       </KeyValueRow>
       <KeyValueRow label="Registry frontend writes">
         <Badge tone="proven">Proven live</Badge>

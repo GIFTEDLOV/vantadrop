@@ -733,3 +733,31 @@ The imported package (real wallet, plaintext amount, single-use EIP-712 claim au
 ### What remains to be tested manually
 
 A human must run the new productized page's five buttons in a real browser against a live recipient wallet on Sepolia. **This has not happened** — only the hidden diagnostic has been proven live. The portal calls the identical service functions with identical arguments, so the risk is concentrated in the new page's own state wiring (gating, resets on package change, wallet-switch refusals, the upload path), not in the SDK integration — but by this document's standard it stays "wired", not "proven", until clicked through.
+
+## Public recipient portal live test result
+
+Date: 2026-07-05. `/recipient/demo` — the productized portal itself, not the hidden diagnostic — was manually run by a human, in a real browser, against a funded recipient burner wallet on live Sepolia, using a freshly-created distribution's claim package. This closes out the "wired, not proven" status above: the productized public recipient portal is now **proven live**.
+
+**Result — package import and every action step succeeded, no errors:**
+
+| Step | Result |
+|---|---|
+| Package import | **Succeeded** — pasted claim package parsed and validated correctly (exact UI copy shown at the time was not saved in this manual note, but the flow reached the eligibility step, which requires successful validation and a matched recipient wallet first) |
+| Package contained `encryptedInput` | **Yes** — confirming the 2026-07-05 encrypted-input fix continues to hold for freshly-created packages |
+| Check eligibility | **Eligible** |
+| Grant decrypt access (`getClaimAmount`) | **Succeeded.** Tx `0x31f2707d15467b49d88efc7fd80e4cd7ba882a35e6970dce96c48ddafc017d15` |
+| Decrypt allocation | **Succeeded.** Decrypted to **5 CTTT** |
+| Claim allocation (`claim`) | **Succeeded.** Tx `0xcc81b47cb2b45dfe7c3bc5cf3b6f2f89fcfc911778ff35d1a13bb7d13ae62304` |
+| Verify post-claim balance | **Succeeded.** Post-claim confidential balance decrypted to **10 CTTT** |
+
+No errors at any step; no browser console errors reported.
+
+**On the 10 CTTT post-claim balance (not 5):** this is expected, not a discrepancy. The same recipient wallet had already claimed 5 CTTT once before, in the earlier hidden-diagnostic run against a *different* distribution (see "Live browser recipient decrypt/claim result" above). This new productized-portal run claimed a *second*, separate 5 CTTT allocation from a freshly-created distribution into the *same* wallet — CTTT balances accumulate per-wallet across distributions, so 5 (prior) + 5 (this run) = 10 confidential balance, confirmed by decryption. The individual claim amount for this run was still verified as exactly 5 CTTT at the decrypt-allocation step, matching the fresh distribution's actual allocation.
+
+**On the missing create/fund tx, airdrop clone, and registry tx/status for this specific fresh distribution:** not captured in the manual note that produced this result, and not otherwise recorded in this document. **This does not invalidate the proof.** The recipient portal's own flow only reaches "Grant decrypt access" and "Claim allocation" after `checkRecipientEligibility` succeeds against a real, already-deployed TokenOps airdrop clone (`preflightClaim` + `isSignatureValid` against that specific clone's on-chain state), and `claimAllocation` itself only succeeds if the clone was actually funded with a matching confidential balance and the admin signature validates for the connected caller — a claim transaction cannot succeed against a clone that was never created or funded. The two confirmed, real, on-chain transaction hashes above (`getClaimAmount`, `claim`) are themselves sufficient evidence that a valid, funded TokenOps confidential airdrop existed and this specific claim succeeded against it, independent of whether the earlier create/fund/register step details were separately written down.
+
+**What this proves:**
+- **The public, productized recipient portal is proven live** — not just the hidden diagnostic. A real user, using the actual product UI (not developer tooling), imported a claim package and successfully completed the full decrypt/claim sequence against live Sepolia.
+- Combined with the earlier proven issuer flow and the earlier proven recipient diagnostic, **the complete VantaDrop product surface — issuer creates via `/create`, recipient claims via `/recipient/demo` — is now proven live end-to-end**, using the actual public pages a real user would touch, not only developer-only diagnostics.
+
+**What remains:** final UI polish and demo packaging (README/submission materials, any remaining visual refinement) — no further functional proof is outstanding for the core confidential-distribution lifecycle this project set out to demonstrate.
