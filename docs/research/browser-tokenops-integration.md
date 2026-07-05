@@ -668,3 +668,31 @@ Date: 2026-07-05. A bug was found (not by running anything live — by reading c
 **Registry is unaffected — still never stores recipient data, amounts, signatures, handles, or proofs.** This entire fix is about what the *sender's own browser localStorage* records for later delivery to a recipient; `VantaDropRegistry.registerDistribution` (called separately, unchanged) still receives only `token`, `tokenOpsAirdrop`, `title`, `useCase`, `recipientCount`, and an empty `metadataURI` — nothing from this fix touches that call or its arguments.
 
 **Consequence for distribution #2:** its saved package (created before this fix existed) only has `encryptedHandleSummary`, not `encryptedInput`. The recipient diagnostic's manual-paste fallback can still exercise it *if* the full `{ handle, inputProof }` was captured separately at creation time (e.g. copied from the browser's dev tools / network inspector during the original run) — otherwise that specific claim is not recoverable from any package, browser storage, or on-chain data, by the same privacy design that keeps allocation data off-chain in the first place. **A fresh distribution (created after this fix, via the now-corrected `/create` flow) is the reliable path to a fully testable recipient diagnostic run** — its package will carry the full encrypted input automatically, with no manual paste step required.
+
+## Live browser recipient decrypt/claim result
+
+Date: 2026-07-05. `/dev/recipient-claim-diagnostic` was manually run by a human, in a real browser, against a funded recipient burner wallet on live Sepolia — using a fresh, post-fix distribution whose package included the full `recipients[].encryptedInput` automatically (per the fix directly above). This closes out the recipient side of the flow as **proven live**, the same bar reached earlier by the issuer side, the standalone operator/encryption diagnostics, and the sender preparation panel.
+
+**Airdrop clone tested:** `0xD11f04…6aB7` (a fresh distribution created after the encrypted-input fix, distinct from registry distribution #2, whose pre-fix package could not supply the full claim material).
+
+**Result — every step succeeded, no errors:**
+
+| Step | Result |
+|---|---|
+| Package parsed | Contained `recipients[].encryptedInput` automatically — no manual paste required, confirming the fix from the previous checkpoint works as designed |
+| Check eligibility | **Eligible** — preflight ready, signature valid |
+| Grant decrypt access (`getClaimAmount`) | **Succeeded.** Tx `0x0e06c8da68a72ca77a25e21be1d292c86691b2f486590124f67303bb2e5814b6` |
+| Decrypt allocation | **Succeeded.** Decrypted to **5 CTTT** |
+| Claim allocation (`claim`) | **Succeeded.** Tx `0x1404963b36b651042e91193afe5287d34bf84627a69199ff18820919559c6607` — the single-use authorization is now consumed |
+| Verify post-claim balance | **Succeeded.** Post-claim confidential balance decrypted to **5 CTTT**, confirming the confidential transfer actually moved value, not merely that the claim tx didn't revert |
+
+No errors at any step; no browser console errors reported.
+
+**What this proves:**
+- **The recipient browser decrypt/claim flow is proven live**, end-to-end: package parsing → eligibility check → `getClaimAmount` (ACL grant) → Zama decrypt → `claim` → post-claim balance re-verification, all from a real browser, a real injected wallet, and real Sepolia state.
+- Combined with the issuer side proven in the previous live checkpoint, **the full VantaDrop app is now functionally proven end-to-end on Sepolia**: an issuer can create and fund a confidential distribution from the browser, and a recipient can independently discover, decrypt, and claim their own allocation from the browser — the complete confidential-distribution lifecycle this project set out to demonstrate, with every step backed by a real transaction hash rather than a simulation.
+- The encrypted-input package fix from the previous checkpoint is empirically validated: a freshly-created package carried everything the recipient diagnostic needed with zero manual intervention.
+
+**What remains:**
+- **The final public recipient portal still needs productized UI.** Both diagnostics (`/dev/tokenops-diagnostic` for the issuer side, `/dev/recipient-claim-diagnostic` for the recipient side) are hidden, developer-only pages built to prove the underlying primitives work — they are not the polished, production-facing experience `/recipient/demo` and `/create` are meant to become. Wiring this proven sequence into `/recipient/demo` (or a future `/drop/[id]`-style claim page) with real product UX — collapsing steps sensibly, handling the claim-package delivery/import flow non-technically, hiding developer-level detail — is the next phase of work, not yet started.
+- The claim-package delivery mechanism between issuer and recipient remains manual (copy/paste JSON) — a real product would need a cleaner private-sharing mechanism, though the registry deliberately continues to play no part in that delivery (see privacy rules throughout this document).

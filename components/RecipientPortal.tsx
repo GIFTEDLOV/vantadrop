@@ -17,15 +17,29 @@ import { WalletStatusBar } from "./wallet/WalletStatusBar";
 /**
  * Demo recipient portal.
  *
- * HONESTY CONTRACT: wallet connection and Sepolia network detection are now
- * live in this UI — but no transaction is sent from this page. The issuer-side
- * create flow is now wired in /create; recipient browser decrypt/claim wiring
- * (this page's live version) is the NEXT phase — there is deliberately no
- * live claim button here. (A hidden, dev-only diagnostic for manually proving
- * the live recipient flow exists at /dev/recipient-claim-diagnostic; it is
- * deliberately separate from this public demo, which stays unwired.) Every stage
- * shows two things, clearly separated:
- *   1. what the live flow will do once browser TokenOps execution lands, and
+ * HONESTY CONTRACT: wallet connection and Sepolia network detection are live
+ * in this UI — but no transaction is sent from this page. The issuer-side
+ * create flow is wired in /create; recipient browser decrypt/claim has now
+ * been PROVEN LIVE (2026-07-05), but only via the hidden, dev-only diagnostic
+ * at /dev/recipient-claim-diagnostic — a human ran eligibility check →
+ * getClaimAmount → decrypt → claim → post-claim verify against a real
+ * recipient burner wallet on live Sepolia, decrypting a real 5 CTTT
+ * allocation and confirming the post-claim balance. See
+ * docs/research/browser-tokenops-integration.md ("Live browser recipient
+ * decrypt/claim result") for the real tx hashes.
+ *
+ * This page itself deliberately still has no live claim button — wiring the
+ * diagnostic's proven sequence into THIS public, non-developer-facing page
+ * (productization: collapsing steps, hiding raw handles/proofs, a real
+ * claim-package delivery UX) is the next phase, not yet started. In the
+ * eventual product, the sender shares each recipient's claim package
+ * privately (out-of-band, e.g. the copy-paste flow /create already produces)
+ * and the recipient imports it here — VantaDropRegistry never stores claim
+ * packages, signatures, or amounts; it only ever holds public metadata (see
+ * contracts/VantaDropRegistry.sol).
+ *
+ * Every stage below shows two things, clearly separated:
+ *   1. what the live flow will do once this page itself is wired, and
  *   2. what the proven Sepolia spike (scripts/spike-tokenops-sepolia.ts)
  *      actually did, with the real transaction hash / decrypted result.
  * Advancing through stages is a walkthrough of proven facts — it never
@@ -67,9 +81,11 @@ export function RecipientPortal() {
             <NetworkGuard />
             {wallet.isConnected && (
               <p className="text-[13px] text-zinc-500">
-                Connected — detection only. Recipient browser decrypt/claim wiring is the
-                next phase: eligibility checks, decryption, and claiming still cannot be
-                performed from this page.
+                Connected — detection only. Recipient decrypt/claim has been proven live in
+                the browser diagnostic (/dev/recipient-claim-diagnostic) — eligibility
+                checks, decryption, and claiming still cannot be performed from this public
+                page until that proven sequence is wired here (portal productization, the
+                next phase).
               </p>
             )}
           </div>
@@ -194,7 +210,8 @@ export function RecipientPortal() {
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone="demo">Demo UI — based on proven Sepolia spike</Badge>
         <Badge tone="neutral">Wallet connect live</Badge>
-        <Badge tone="pending">Recipient decrypt/claim wiring — next phase</Badge>
+        <Badge tone="proven">Decrypt/claim proven live (diagnostic)</Badge>
+        <Badge tone="pending">Portal productization — next phase</Badge>
       </div>
       <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white">
         Recipient portal

@@ -40,9 +40,21 @@ const serviceLayerPresent =
  * flow result") for the real tx hashes, the created airdrop clone address,
  * and the recovered registry distribution id this claim is based on.
  *
- * This does NOT mean the full product flow is complete. Recipient
- * decrypt/claim remains fully unwired (next phase) — the recipient tied to
- * the one live distribution created so far has not claimed anything yet.
+ * "Proven live" for recipient decrypt/claim means a human ran the complete
+ * /dev/recipient-claim-diagnostic sequence — package parse, eligibility
+ * check, getClaimAmount (ACL grant), Zama decrypt, claim, post-claim balance
+ * re-verify — against a funded recipient burner wallet on live Sepolia, and
+ * it succeeded end-to-end (decrypted allocation and post-claim balance both
+ * matched: 5 CTTT). See docs/research/browser-tokenops-integration.md ("Live
+ * browser recipient decrypt/claim result") for the real tx hashes.
+ *
+ * IMPORTANT DISTINCTION — "proven live" here means the underlying primitives
+ * work end-to-end, proven via the hidden dev diagnostics. It does NOT mean
+ * the public-facing product UI is finished: /recipient/demo and /create still
+ * need the diagnostics' proven sequences wired into productized,
+ * non-developer-facing flows (collapsing steps, hiding raw handles/proofs,
+ * a real claim-package delivery UX instead of copy/paste JSON). That
+ * productization work has not started.
  */
 export function IntegrationStatus() {
   const totalDistributions = useTotalDistributions();
@@ -54,10 +66,11 @@ export function IntegrationStatus() {
         Where the browser integration actually stands. &quot;Ready&quot; means typed
         service functions exist and compile into this bundle. &quot;Proven live&quot; means
         a human ran that exact action against a funded burner wallet on live Sepolia and
-        it succeeded. The full issuer create flow (sender prep → operator approval →
-        encrypt → sign → create-and-fund → register) has now been run live end-to-end —
-        see the research doc for tx hashes and the resulting distribution. The recipient
-        portal still sends nothing.
+        it succeeded. Both the full issuer create flow and the recipient decrypt/claim
+        flow have now been run live end-to-end — see the research doc for tx hashes and
+        the resulting distributions. Both live sequences were run via hidden developer
+        diagnostics, not the public-facing pages: /recipient/demo and /create still need
+        this proven sequence wired into productized, non-developer UI.
       </p>
       <KeyValueRow label="Wallet foundation">
         <Badge tone="proven">Ready</Badge>
@@ -78,7 +91,7 @@ export function IntegrationStatus() {
         <Badge tone="proven">Proven live</Badge>
       </KeyValueRow>
       <KeyValueRow label="Recipient decrypt/claim">
-        <Badge tone="pending">Not wired yet</Badge>
+        <Badge tone="proven">Proven live (diagnostic) — public portal pending</Badge>
       </KeyValueRow>
       <KeyValueRow label="Registry frontend writes">
         <Badge tone="proven">Proven live</Badge>
@@ -98,9 +111,9 @@ export function IntegrationStatus() {
         </KeyValueRow>
         <p className="mt-2 text-[12px] leading-relaxed text-zinc-600">
           This row is a real read-only call to VantaDropRegistry.totalDistributions()
-          from your browser — the first live registry wiring. The proven demo airdrop
-          predates the registry frontend and was never registered, so 0 remains the
-          honest count until the now-wired issuer flow is run live for the first time.
+          from your browser. The original proven demo airdrop predates the registry
+          frontend and was never registered; the count above reflects only
+          distributions actually registered by the now-proven-live issuer flow.
         </p>
       </div>
     </Card>
