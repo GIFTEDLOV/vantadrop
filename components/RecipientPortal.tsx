@@ -21,7 +21,9 @@ import { WalletStatusBar } from "./wallet/WalletStatusBar";
  * live in this UI — but no transaction is sent from this page. The issuer-side
  * create flow is now wired in /create; recipient browser decrypt/claim wiring
  * (this page's live version) is the NEXT phase — there is deliberately no
- * live claim button here. Every stage
+ * live claim button here. (A hidden, dev-only diagnostic for manually proving
+ * the live recipient flow exists at /dev/recipient-claim-diagnostic; it is
+ * deliberately separate from this public demo, which stays unwired.) Every stage
  * shows two things, clearly separated:
  *   1. what the live flow will do once browser TokenOps execution lands, and
  *   2. what the proven Sepolia spike (scripts/spike-tokenops-sepolia.ts)
