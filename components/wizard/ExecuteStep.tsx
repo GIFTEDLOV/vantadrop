@@ -569,7 +569,12 @@ export function ExecuteStep({
       "",
       "Your allocation amount is encrypted on-chain — only you will be able to decrypt it.",
       "",
-      "IMPORTANT: the in-browser recipient claim flow is not live yet — recipient decrypt/claim wiring is the next phase of this project. The sender holds your encrypted claim payload and will share claim steps once the recipient portal ships. A demo walkthrough of what that flow will look like is at the sender's VantaDrop /recipient/demo page.",
+      "How to claim:",
+      "1. Ask the sender for your claim package (a JSON file/text they exported when creating this distribution — it is shared privately, never published).",
+      "2. Open the sender's VantaDrop recipient portal at /recipient/demo in a browser with your wallet, connected to Sepolia.",
+      "3. Import the claim package (paste or upload), then follow the on-page steps: check eligibility, grant decrypt access, optionally decrypt your amount, and claim.",
+      "",
+      "IMPORTANT: your claim authorization is single-use. Keep the claim package private and only use it with the exact wallet address it was issued to.",
     ].join("\n");
   }
 
@@ -867,10 +872,10 @@ export function ExecuteStep({
           </div>
           <p className="mt-2 text-[12px] leading-relaxed text-zinc-500">
             Next steps: keep the package JSON safe (it holds each recipient&apos;s claim
-            authorization), and deliver claim data to recipients out-of-band. The demo
+            authorization), and deliver it to recipients out-of-band. Recipients import
+            it at the recipient portal (/recipient/demo) to decrypt and claim. The demo
             Distribution Room link above is a demo example — this new distribution does
-            not have its own room page yet, and the in-browser recipient decrypt/claim
-            flow is the next phase.
+            not have its own room page yet.
           </p>
         </Card>
       )}

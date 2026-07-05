@@ -7,9 +7,13 @@
  * userDecrypt → claim → post-claim balance verify), translated to the browser
  * signing model per `docs/research/browser-tokenops-integration.md` §6.
  *
- * NOT WIRED: nothing in this file is called from any page render path or
- * click handler in the current phase. The recipient portal still shows the
- * proven spike results, honestly labeled — it does not call these yet.
+ * WIRING STATUS: every function here is called behind explicit manual
+ * buttons from two surfaces — the hidden developer diagnostic
+ * (app/dev/recipient-claim-diagnostic, where the full five-step sequence was
+ * PROVEN LIVE on Sepolia on 2026-07-05) and the public recipient portal
+ * (components/RecipientPortal.tsx → /recipient/demo, wired to these same
+ * functions but not yet itself exercised live). Nothing here runs at render
+ * time — click handlers only.
  *
  * `account` FOOTGUN (same rule as lib/tokenops/issuer.ts, restated because
  * the two paid recipient writes — getClaimAmount and claim — are exactly the

@@ -49,12 +49,13 @@ const serviceLayerPresent =
  * browser recipient decrypt/claim result") for the real tx hashes.
  *
  * IMPORTANT DISTINCTION — "proven live" here means the underlying primitives
- * work end-to-end, proven via the hidden dev diagnostics. It does NOT mean
- * the public-facing product UI is finished: /recipient/demo and /create still
- * need the diagnostics' proven sequences wired into productized,
- * non-developer-facing flows (collapsing steps, hiding raw handles/proofs,
- * a real claim-package delivery UX instead of copy/paste JSON). That
- * productization work has not started.
+ * work end-to-end, proven via the hidden dev diagnostics. The public
+ * recipient portal (/recipient/demo) now has the diagnostic's proven service
+ * functions wired behind real, productized buttons ("Wired — ready for live
+ * testing" below) — but that specific page's UI has NOT itself been run live
+ * against a wallet yet. Same "wired ≠ proven live" bar every prior phase
+ * used: it becomes "proven live" only after a human clicks through it on
+ * Sepolia.
  */
 export function IntegrationStatus() {
   const totalDistributions = useTotalDistributions();
@@ -67,10 +68,11 @@ export function IntegrationStatus() {
         service functions exist and compile into this bundle. &quot;Proven live&quot; means
         a human ran that exact action against a funded burner wallet on live Sepolia and
         it succeeded. Both the full issuer create flow and the recipient decrypt/claim
-        flow have now been run live end-to-end — see the research doc for tx hashes and
-        the resulting distributions. Both live sequences were run via hidden developer
-        diagnostics, not the public-facing pages: /recipient/demo and /create still need
-        this proven sequence wired into productized, non-developer UI.
+        flow have been run live end-to-end via hidden developer diagnostics — see the
+        research doc for tx hashes. The public recipient portal (/recipient/demo) now
+        wires those same proven recipient service functions behind productized buttons
+        (&quot;Wired&quot;), but that page&apos;s own UI has not yet been exercised live —
+        wired is not proven.
       </p>
       <KeyValueRow label="Wallet foundation">
         <Badge tone="proven">Ready</Badge>
@@ -90,8 +92,11 @@ export function IntegrationStatus() {
       <KeyValueRow label="Full issuer execution">
         <Badge tone="proven">Proven live</Badge>
       </KeyValueRow>
-      <KeyValueRow label="Recipient decrypt/claim">
-        <Badge tone="proven">Proven live (diagnostic) — public portal pending</Badge>
+      <KeyValueRow label="Recipient decrypt/claim diagnostic">
+        <Badge tone="proven">Proven live</Badge>
+      </KeyValueRow>
+      <KeyValueRow label="Public recipient portal (/recipient/demo)">
+        <Badge tone="pending">Wired — ready for live testing</Badge>
       </KeyValueRow>
       <KeyValueRow label="Registry frontend writes">
         <Badge tone="proven">Proven live</Badge>

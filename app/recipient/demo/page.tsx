@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { RecipientPortal } from "../../../components/RecipientPortal";
 
 export const metadata: Metadata = {
-  title: "Recipient Portal — Demo",
+  title: "Recipient Portal",
   description:
-    "Walk through the recipient flow of the proven Sepolia demo: check eligibility, decrypt your own allocation, claim.",
+    "Claim your confidential token allocation: import the claim package your sender shared privately, check eligibility, decrypt your own amount, and claim — all on Sepolia.",
 };
 
 export default function RecipientDemoPage() {
