@@ -27,10 +27,27 @@ export interface DistributionPackageRecipient {
   /** The signed EIP-712 claim authorization (single-use, recipient-bound). */
   claimAuthorization: Hex;
   /**
-   * Safe descriptor of the encrypted allocation (shortened opaque ciphertext
-   * id + proof size) — NOT a plaintext amount, and deliberately not the full
-   * claim payload. The full { encryptedInput, signature } delivery format for
-   * recipients is defined in the next phase (recipient decrypt/claim wiring).
+   * The FULL encrypted allocation input the admin signed over — required by
+   * every recipient-side SDK call (preflightClaim/isSignatureValid need the
+   * handle; getClaimAmount/claim need both handle and inputProof as calldata;
+   * the EIP-712 signature commits to this exact handle, so a re-encrypted or
+   * truncated substitute will not validate). This is the actual claim
+   * material, same privacy tier as claimAuthorization above — local-browser
+   * only, never on-chain, never logged.
+   *
+   * Fixed 2026-07-05 (see docs/research/browser-tokenops-integration.md
+   * "Distribution package encrypted input fix"): earlier packages (including
+   * live registry distribution #2) only ever stored `encryptedHandleSummary`
+   * below and omitted this field entirely, making their claims unexercisable
+   * without a separate hand-pasted { handle, inputProof }.
+   */
+  encryptedInput: { handle: Hex; inputProof: Hex };
+  /**
+   * Safe, human-scannable descriptor of the same ciphertext (shortened handle
+   * + proof byte count) — display/cross-check convenience only. The
+   * recipient claim diagnostic (app/dev/recipient-claim-diagnostic) verifies
+   * `encryptedInput` above against this string; never treat this summary
+   * alone as sufficient to claim.
    */
   encryptedHandleSummary: string;
 }

@@ -452,8 +452,18 @@ export function ExecuteStep({
           note: validRows[i].note,
           amount: validRows[i].amount,
           claimAuthorization: payload.signature,
+          // FULL encrypted input — required by the recipient-side SDK calls
+          // (preflightClaim/isSignatureValid/getClaimAmount/claim all need
+          // the exact { handle, inputProof } pair the signature commits to).
+          // Fixed 2026-07-05 — see lib/distribution.ts and
+          // docs/research/browser-tokenops-integration.md "Distribution
+          // package encrypted input fix". This is claim material, same
+          // privacy tier as claimAuthorization: local-browser only, never
+          // on-chain, never logged.
+          encryptedInput: payload.encryptedInput,
           // Safe descriptor only: opaque ciphertext id (shortened) + proof
-          // size. Never a plaintext amount.
+          // size. Display/cross-check convenience — never a substitute for
+          // encryptedInput above.
           encryptedHandleSummary: `handle ${shortHex(payload.encryptedInput.handle, 10)} · proof ${(payload.encryptedInput.inputProof.length - 2) / 2} bytes`,
         })),
         txHashes: {
@@ -816,9 +826,15 @@ export function ExecuteStep({
 
           <p className="mt-4 rounded-lg border border-violet-500/25 bg-violet-500/[0.06] px-4 py-3 text-[13px] leading-relaxed text-violet-200">
             The full distribution package (recipient list, amounts, notes, claim
-            authorizations) was saved to your browser&apos;s local storage — this is not
-            on-chain and not shared with anyone. Only the public metadata above (title,
-            use case, addresses, recipient count) exists on-chain.
+            authorizations, and each recipient&apos;s full encrypted allocation input) was
+            saved to your browser&apos;s local storage — this is not on-chain and not
+            shared with anyone. Only the public metadata above (title, use case,
+            addresses, recipient count) exists on-chain.
+          </p>
+
+          <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.08] px-4 py-3 text-[13px] font-medium leading-relaxed text-amber-200">
+            This package contains claim authorization and encrypted input data required
+            by recipients. Save it locally and do not publish it.
           </p>
 
           <div className="mt-4 flex flex-wrap items-center gap-3">

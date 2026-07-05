@@ -41,20 +41,23 @@
  *   because that is the entire point of the recipient flow — it is the
  *   recipient's own number, shown only to them, only in their browser.
  *
- * WHY THERE ARE TWO PASTE FIELDS (honest gap, do not paper over): the
- * DistributionPackage saved by the issuer wizard (lib/distribution.ts)
- * deliberately stores only a truncated `encryptedHandleSummary` per
- * recipient — the research doc records "the real recipient delivery format
- * is a next-phase decision". But every recipient-side SDK call requires the
- * FULL `{ handle, inputProof }` pair the admin signed (the signature commits
- * to the exact bytes32 handle; the proof is required calldata — see the
- * ClaimArgs TSDoc in @tokenops/sdk). So this page accepts the full encrypted
- * input either as an optional `encryptedInput` field on the pasted package's
- * matched recipient (forward-compatible superset — the base shape is still
- * exactly lib/distribution.ts's), or via the second paste field, and
- * CROSS-CHECKS it against the package's `encryptedHandleSummary` (prefix,
- * suffix, and proof byte length — a real computed comparison, not an
- * assumption). A mismatch hard-disables all action buttons.
+ * WHY THERE ARE TWO PASTE FIELDS: fixed 2026-07-05 (see
+ * docs/research/browser-tokenops-integration.md "Distribution package
+ * encrypted input fix") — lib/distribution.ts's DistributionPackageRecipient
+ * now includes the FULL `recipients[].encryptedInput: { handle, inputProof }`
+ * that every recipient-side SDK call actually requires (the signature
+ * commits to the exact bytes32 handle; the proof is required calldata — see
+ * the ClaimArgs TSDoc in @tokenops/sdk), alongside the pre-existing
+ * `encryptedHandleSummary` display string. Freshly-created packages (from the
+ * fixed ExecuteStep.tsx) therefore resolve automatically — this page detects
+ * `recipients[].encryptedInput` on the matched recipient and uses it with no
+ * further action. The manual paste field below is kept ONLY as a fallback for
+ * packages created before this fix (e.g. registry distribution #2, whose
+ * saved package predates it and only has the summary) — for those, paste the
+ * full `{ handle, inputProof }` separately and it is CROSS-CHECKED against
+ * the package's `encryptedHandleSummary` (prefix, suffix, and proof byte
+ * length — a real computed comparison, not an assumption). A mismatch
+ * hard-disables all action buttons.
  *
  * BUTTON GATING (documented choice — clarity over rigidity): every button
  * requires ALL base gates (wallet connected on Sepolia + package parsed +
@@ -118,10 +121,14 @@ import {
 /* ------------------------------------------------------------------ */
 
 /**
- * Tolerated superset of the exact lib/distribution.ts recipient shape: a
- * future (or hand-amended) package may carry the full encrypted input per
- * recipient. The base fields are validated against the real type; this extra
- * field is optional and validated separately when present.
+ * `DistributionPackageRecipient.encryptedInput` is now the canonical field
+ * (see lib/distribution.ts) for freshly-created packages. This local
+ * override re-declares it as optional/`unknown`-shaped purely so parsing
+ * tolerates PRE-FIX packages that predate the 2026-07-05 fix and lack the
+ * field entirely (e.g. registry distribution #2) — those still validate
+ * successfully here and fall back to the manual paste field below. The
+ * runtime shape is always re-checked via validateEncryptedInputShape()
+ * regardless of what this compile-time type implies.
  */
 type RecipientMaybeWithPayload = DistributionPackageRecipient & {
   encryptedInput?: { handle?: unknown; inputProof?: unknown };
@@ -819,8 +826,9 @@ export default function RecipientClaimDiagnosticPage() {
             )}
           </div>
 
-          {/* Full encrypted claim input — required because the package format
-              only carries a truncated summary (see file header). */}
+          {/* Full encrypted claim input — auto-detected from recipient.encryptedInput
+              on freshly-created packages (fixed 2026-07-05); the paste field below
+              is a fallback for older packages that predate the fix (see file header). */}
           {matched && (
             <div className="mt-4 border-t border-white/[0.05] pt-4">
               <p className="text-[13px] font-medium text-zinc-300">Full encrypted claim input</p>
@@ -829,12 +837,16 @@ export default function RecipientClaimDiagnosticPage() {
                 <code className="rounded bg-white/5 px-1 py-0.5 font-mono text-[11px]">
                   {"{ handle, inputProof }"}
                 </code>{" "}
-                pair the issuer signed, but this package format stores only a truncated
-                summary (
-                <span className="font-mono text-[11px] text-zinc-400">{matched.encryptedHandleSummary}</span>
-                ). Provide it via an <code className="rounded bg-white/5 px-1 py-0.5 font-mono text-[11px]">encryptedInput</code>{" "}
-                field on the recipient inside the pasted package, or paste it below. It is
-                cross-checked against the summary and held in memory only.
+                pair the issuer signed. Packages created after the 2026-07-05 fix include
+                this automatically as{" "}
+                <code className="rounded bg-white/5 px-1 py-0.5 font-mono text-[11px]">recipients[].encryptedInput</code>{" "}
+                and it is detected with no further action. Older packages (e.g. registry
+                distribution #2) predate the fix and stored only the truncated summary
+                below — paste the full input manually in that case; it is cross-checked
+                against the summary and held in memory only.
+              </p>
+              <p className="mt-2 text-[11px] text-zinc-600">
+                Summary on file: <span className="font-mono text-zinc-400">{matched.encryptedHandleSummary}</span>
               </p>
               {encResolution && !encResolution.ok && encResolution.needsPaste && (
                 <textarea
@@ -855,7 +867,9 @@ export default function RecipientClaimDiagnosticPage() {
                   {encResolution?.ok && (
                     <span className="inline-flex flex-wrap items-center gap-2">
                       <Badge tone="proven">
-                        Resolved ({encResolution.source === "package" ? "from package" : "pasted"})
+                        {encResolution.source === "package"
+                          ? "Full encrypted input found in package."
+                          : "Resolved (pasted fallback)"}
                       </Badge>
                     </span>
                   )}
