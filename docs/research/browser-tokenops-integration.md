@@ -558,3 +558,47 @@ The check/approve pattern from `/dev/tokenops-diagnostic` was extracted into `li
 4. Get CTTT: tick the burner checkbox and click **Mint test CTTT** (10 CTTT per click; mint more times if your planned total exceeds that), or alternatively run the Node spike script's mint step (`npm run spike` with `.env.local` configured). Re-run the free readiness check — it should flip from "zero handle" to "handle exists".
 5. Click **Check operator approval**; if it returns "Approval needed", click **Approve TokenOps operator** (1 tx). This can also be done on `/dev/tokenops-diagnostic`, or left to the Execute step itself (which checks again and approves only if needed) — doing it here just front-loads one prompt.
 6. Proceed through the wizard; the Execute step re-verifies everything with its own gates before sending anything.
+
+## Live browser issuer create flow result
+
+Date: 2026-07-05. The full `/create` wizard's live issuer execution flow (`ExecuteStep.tsx`) was manually run by a human, in a real browser, against a funded burner wallet on live Sepolia — not a simulation, not a dry run. This closes out the issuer-side create flow as **proven live**, the same bar previously reached by the two standalone diagnostics (operator approval, browser encryption).
+
+**Route tested:** `/create`, full wizard (sender preparation panel → recipient entry → privacy review → execute).
+
+**Wallet:** connected, on Sepolia (chain id `11155111`). Sender preparation (ETH balance check, CTTT readiness, operator approval) was completed via the `SenderPrepPanel` before proceeding to execute.
+
+**Result — every step in the execution timeline succeeded:**
+
+| Step | Result |
+|---|---|
+| Operator approval | Checked/ensured (no separate tx hash captured in this note — see "Registry distribution ID" note below for what was recoverable) |
+| Create and fund airdrop | **Succeeded.** Tx `0x0774d49cf4c076c4e3f0d4b74fa56df85a5361d3b1037f87617d3d33800c2735` |
+| Airdrop clone deployed | **`0x62a4cBdD9DE1ccfc396605874929a44ea9C14c27`** |
+| Encrypt allocations + sign claims | Succeeded (implied by the registry write succeeding — the wizard only reaches the registry step after these complete) |
+| Register public metadata | **Succeeded.** Tx `0x6b79ee307a916bf991bd7f73c44ed560afb42bc070a3d1353a3db1a2a0f047be` |
+
+**Registry distribution ID: recovered safely.** The registry tx hash is a public Sepolia transaction — its receipt was read read-only (no wallet, no secrets, just `getTransactionReceipt` + `parseEventLogs` against the already-public `vantaDropRegistryAbi`) and decoded the `DistributionRegistered` event directly:
+
+```json
+{
+  "distributionId": "2",
+  "sender": "0x4f7a14c8cd83caa18Fafc35aA91a8483Cc95E3E5",
+  "token": "0x258F9D60dc023870e4E3109c894D834D5377361a",
+  "tokenOpsAirdrop": "0x62a4cBdD9DE1ccfc396605874929a44ea9C14c27",
+  "title": "VantaDrop Browser Test",
+  "useCase": "Community rewards",
+  "recipientCount": "1"
+}
+```
+
+`tokenOpsAirdrop` in the decoded event matches the reported airdrop clone address exactly, cross-confirming both pieces of evidence independently. **Registry distribution ID: 2.**
+
+**What this proves:**
+- **The issuer-side browser create flow is proven live**, end-to-end: sender preparation → operator approval → encrypt-and-sign → create-and-fund → register, all from a real browser, a real injected wallet, and real Sepolia state — not just its individual primitives in isolation (which were proven in earlier checkpoints).
+- The registry now holds one real, live-created public entry (distribution #2), a first for this project — `totalDistributions()` should now read `1` (or higher, if anything else was registered since) rather than the `0` seen throughout earlier checkpoints.
+
+**What remains unproven / explicitly still not wired:**
+- **Recipient decrypt/claim is still not wired.** No recipient-side action (`checkRecipientEligibility`, `grantDecryptAccess`, `decryptAllocationHandle`, `claimAllocation`, `verifyPostClaimBalance`) has been exercised from a browser for this new distribution (or any other) — the recipient tied to distribution #2 has not claimed anything yet, live or otherwise. Full end-to-end (issuer creates → recipient claims) browser flow is **not** complete; only the issuer half is proven.
+- The local distribution package (containing the plaintext recipient list, amount, and signed claim authorization for this run) lives only in the browser's own `localStorage` on the machine that ran the wizard — it is not committed, not shared, and not recoverable from the public chain data alone (by design; that's the whole point of the privacy model). This document intentionally does not reproduce that package's contents.
+
+**Next phase:** recipient decrypt/claim wiring — the same discipline as the issuer phase (a diagnostic-style proof of the individual `getClaimAmount`/decrypt/`claim` primitives from a browser first, if not already covered by earlier standalone diagnostics, then composing them into a real recipient-facing flow) — informed by this now-proven issuer side and the real, live distribution (#2) it produced to test against.
