@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { isAddress } from "viem";
 import { CTTT_DECIMALS, CTTT_TOKEN_ADDRESS } from "../../lib/constants";
-import { Badge, Card } from "../ui";
+import { Badge, Card, GradientCard, ProofCard, SectionLabel } from "../ui";
 import { PrivacyModel } from "../PrivacyModel";
 import { WalletStatusBar } from "../wallet/WalletStatusBar";
 import { ExecuteStep } from "./ExecuteStep";
@@ -40,7 +40,7 @@ export function CreateWizard() {
     }
   }, [step, state.typeId, state.title, tokenValid, parsed.validCount, parsed.errorCount]);
 
-  const shareLink = "/recipient/demo";
+  const shareLink = "/drops";
 
   async function copyShareLink() {
     try {
@@ -55,14 +55,40 @@ export function CreateWizard() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6">
-      <div className="mb-2 flex items-center gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight text-white">
-          Create distribution
-        </h1>
-        <Badge tone="neutral">Sepolia</Badge>
+    <div className="page-section-tight">
+      <div className="mb-8 grid gap-6 xl:grid-cols-[1fr_360px]">
+        <div>
+          <SectionLabel>Sender console</SectionLabel>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <h1 className="text-[clamp(36px,5vw,72px)] font-semibold leading-[0.96] tracking-[-0.075em] text-white">
+              Create confidential distribution
+            </h1>
+            <Badge tone="neutral">Sepolia</Badge>
+          </div>
+          <p className="mt-5 max-w-3xl text-[15px] leading-relaxed text-zinc-400">
+            Six guided steps. Recipient data stays in your browser. At execution,
+            TokenOps receives encrypted funding and recipient-bound encrypted inputs;
+            VantaDropRegistry receives public metadata only.
+          </p>
+        </div>
+        <GradientCard className="p-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300">
+            Claim Vault boundary
+          </p>
+          <div className="mt-4 grid gap-2">
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 py-3 text-[12px] leading-relaxed text-zinc-300">
+              Claim capsules are encrypted at rest in the Claim Vault.
+            </div>
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 py-3 text-[12px] leading-relaxed text-zinc-300">
+              Released only after matching wallet ownership is verified.
+            </div>
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 py-3 text-[12px] leading-relaxed text-zinc-300">
+              The public registry stores metadata only.
+            </div>
+          </div>
+        </GradientCard>
       </div>
-      <p className="mb-6 text-sm text-zinc-500">
+      <p className="hidden">
         Six steps. Recipient data stays in your browser — at execution only encrypted
         handles and public metadata go on-chain.
       </p>
@@ -82,12 +108,12 @@ export function CreateWizard() {
       )}
 
       {/* ---------------- Stepper ---------------- */}
-      <ol className="mb-10 flex flex-wrap items-center gap-2">
+      <ol className="mb-10 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
         {WIZARD_STEPS.map((label, i) => {
           const isDone = i < step;
           const isCurrent = i === step;
           return (
-            <li key={label} className="flex items-center gap-2">
+            <li key={label}>
               <button
                 type="button"
                 onClick={() => {
@@ -95,9 +121,9 @@ export function CreateWizard() {
                   if (i < step) setStep(i);
                 }}
                 disabled={i > step}
-                className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] font-medium transition ${
+                className={`flex min-h-16 w-full items-center gap-3 rounded-2xl border px-3 py-2 text-left text-[12px] font-medium transition ${
                   isCurrent
-                    ? "border-violet-500/50 bg-violet-500/15 text-violet-200"
+                    ? "border-violet-500/50 bg-violet-500/15 text-violet-100 shadow-lg shadow-violet-950/20"
                     : isDone
                       ? "border-emerald-500/30 bg-emerald-500/[0.07] text-emerald-300 hover:bg-emerald-500/[0.14]"
                       : "border-white/[0.07] bg-white/[0.02] text-zinc-600"
@@ -107,7 +133,7 @@ export function CreateWizard() {
                 {label}
               </button>
               {i < WIZARD_STEPS.length - 1 && (
-                <span className="hidden h-px w-4 bg-white/10 sm:block" />
+                <span className="hidden" />
               )}
             </li>
           );
@@ -115,7 +141,7 @@ export function CreateWizard() {
       </ol>
 
       {/* ---------------- Step content ---------------- */}
-      <div className="min-h-[360px]">
+      <div className="min-h-[420px] rounded-[26px] border border-white/[0.10] bg-white/[0.025] p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl sm:p-6">
         {step === 0 && (
           <div className="space-y-5">
             <div>
@@ -215,9 +241,9 @@ export function CreateWizard() {
               {tokenValid &&
                 state.tokenAddress.trim().toLowerCase() !== CTTT_TOKEN_ADDRESS.toLowerCase() && (
                   <p className="mt-2 text-[13px] text-zinc-500">
-                    Format looks valid. On-chain ERC-7984 interface verification runs at
-                    execution time — the frontend is not yet wired to a live wallet, so no
-                    contract call is made here.
+                    Format looks valid. ERC-7984 interface verification runs
+                    during the live sender flow; no contract call is made during this
+                    draft step.
                   </p>
                 )}
               <button
@@ -261,10 +287,21 @@ export function CreateWizard() {
         {step === 5 && (
           <div className="space-y-5">
             <div>
-              <h2 className="text-lg font-semibold text-white">Share recipient portal link</h2>
+              <h2 className="text-lg font-semibold text-white">Share drops dashboard link</h2>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <ProofCard className="p-4 text-[13px] leading-relaxed text-zinc-300">
+                  Recipients connect their wallet and privately check eligible drops.
+                </ProofCard>
+                <ProofCard className="p-4 text-[13px] leading-relaxed text-zinc-300">
+                  Claim material comes from the encrypted Claim Vault when configured.
+                </ProofCard>
+                <ProofCard className="p-4 text-[13px] leading-relaxed text-zinc-300">
+                  The registry stores public metadata only; it never stores capsules.
+                </ProofCard>
+              </div>
               <p className="mt-1 text-sm text-zinc-500">
-                Each distribution gets a portal link where recipients connect, decrypt their own
-                allocation, and claim. This is the pattern — pointing at the live demo portal.
+                Recipients open the Drops dashboard, sign a harmless eligibility message,
+                and continue to the claim flow only when a matching capsule exists.
               </p>
             </div>
             <Card className="p-5">
@@ -281,9 +318,9 @@ export function CreateWizard() {
                 </button>
               </div>
               <p className="mt-3 text-[13px] text-zinc-500">
-                Live distributions will use per-drop links (e.g.{" "}
-                <span className="font-mono">/recipient/&lt;distribution-id&gt;</span>). The demo
-                portal shows the full recipient flow backed by the proven Sepolia run.
+                The normal product path is wallet discovery from{" "}
+                <span className="font-mono">/drops</span>. Developer diagnostics remain
+                hidden from public navigation.
               </p>
             </Card>
           </div>
@@ -296,7 +333,7 @@ export function CreateWizard() {
           type="button"
           onClick={() => setStep((s) => Math.max(0, s - 1))}
           disabled={step === 0}
-          className="rounded-lg border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+          className="btn-secondary disabled:cursor-not-allowed disabled:opacity-40"
         >
           ← Back
         </button>
@@ -311,7 +348,7 @@ export function CreateWizard() {
               type="button"
               onClick={() => canProceed && setStep((s) => s + 1)}
               disabled={!canProceed}
-              className="rounded-lg bg-gradient-to-r from-violet-500 to-indigo-600 px-6 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              className="btn-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               Continue →
             </button>

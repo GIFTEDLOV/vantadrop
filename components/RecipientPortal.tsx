@@ -20,15 +20,11 @@
  *
  * PRIVACY / DATA-HANDLING RULES (load-bearing, same discipline as the
  * diagnostic):
- * - The imported claim package contains a real recipient wallet, a real
- *   plaintext allocation amount, and a real single-use EIP-712 claim
- *   authorization. It lives ONLY in React component state (plain in-memory
- *   useState) — never localStorage, never sessionStorage, never any server,
- *   never the registry, and it disappears on refresh. sessionStorage was
- *   considered and rejected: connecting an injected wallet does not navigate
- *   away from this page, so there is no redirect to survive and therefore no
- *   UX reason to widen the persistence surface beyond the diagnostic's
- *   proven in-memory precedent.
+ * - The active claim package comes from /drops after wallet-ownership
+ *   verification against VantaDrop's encrypted Claim Vault. The public
+ *   registry never stores recipient lists, amounts, notes, signatures,
+ *   handles, or proofs. Manual JSON import is intentionally absent here and
+ *   remains only in /dev/recipient-claim-diagnostic.
  * - NOTHING on this page calls console.log/warn/error. The claim signature,
  *   input proof, and plaintext amount must never reach the console.
  * - Raw claim material is hidden by default (Task: product UX, not a
@@ -38,18 +34,14 @@
  *   recipient's own number, shown only to them, only in their browser —
  *   that is the entire point of the flow.
  *
- * PACKAGE FORMAT: recipients[].encryptedInput is required here.
- * lib/distribution.ts made it a required field on 2026-07-05 and every
- * package produced by the current /create flow includes it automatically.
- * Unlike the diagnostic (which keeps a manual-paste fallback for pre-fix
- * packages), this forward-looking product page rejects pre-fix packages
- * with a specific error — see lib/distribution-import.ts.
+ * PACKAGE FORMAT: the vault capsule must include recipientWallet,
+ * claimAuthorization, and encryptedInput { handle, inputProof }. The page
+ * adapts that verified capsule into the same recipient-side TokenOps flow.
  *
  * BUTTON GATING (mirrors the diagnostic's documented, proven choices):
- * every action requires ALL base gates (wallet connected on Sepolia +
- * package valid + connected wallet matches a recipient + claim material
- * resolved + single-use acknowledgement checked), enforced both as real
- * `disabled` attributes and as in-handler refusals. Sequentially:
+ * every action requires wallet connected on Sepolia + a vault capsule for the
+ * connected wallet + resolved claim material. The irreversible claim action
+ * also requires the single-use acknowledgement.
  *   - Grant (paid) requires a successful eligibility check — never sent blind.
  *   - Decrypt requires Grant — hard data dependency on the granted handle.
  *   - Claim requires eligibility but deliberately NOT decrypt: the decrypt
@@ -60,7 +52,8 @@
  *   - Verify requires a successful claim.
  */
 
-import { useRef, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import type { Address, Hex } from "viem";
 import { formatEther } from "viem";
 import { usePublicClient, useWalletClient } from "wagmi";
@@ -83,13 +76,13 @@ import {
   shortHex,
 } from "../lib/constants";
 import { formatRawUnits, toRawUnits } from "../lib/csv";
+import type { DistributionPackageRecipient } from "../lib/distribution";
 import {
   describeRecipientActionError,
-  matchRecipient,
   resolveClaimMaterial,
-  validateDistributionPackage,
-  type PackageValidation,
 } from "../lib/distribution-import";
+import { readVaultClaimSession } from "../lib/claimVault/session";
+import type { RecipientVaultSession } from "../lib/claimVault/types";
 import { getBrowserFheBundle } from "../lib/tokenops/browser";
 import {
   checkRecipientEligibility,
@@ -143,12 +136,26 @@ type VerifyState =
 
 type StepStatus = "todo" | "running" | "done" | "error";
 
+interface ActiveClaimPackage {
+  distributionId: string;
+  title: string;
+  useCase: string;
+  network: string;
+  chainId: number;
+  token: Address;
+  tokenOpsAirdrop: Address;
+  registry: Address;
+  registryDistributionId?: number;
+  recipientCount: number;
+  recipients: DistributionPackageRecipient[];
+}
+
 const primaryButtonClass =
-  "rounded-lg bg-gradient-to-r from-violet-500 to-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40";
+  "btn-primary disabled:cursor-not-allowed disabled:opacity-40";
 
 /** Claim gets distinct, heavier styling — it is the one irreversible action. */
 const claimButtonClass =
-  "rounded-lg border-2 border-rose-500/60 bg-rose-500/15 px-5 py-3 text-sm font-bold text-rose-200 transition hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-40";
+  "btn-danger px-5 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40";
 
 function StepDot({ status, index }: { status: StepStatus; index: number }) {
   const cls =
@@ -168,6 +175,37 @@ function StepDot({ status, index }: { status: StepStatus; index: number }) {
   );
 }
 
+function packageFromVaultSession(
+  session: RecipientVaultSession | undefined,
+): ActiveClaimPackage | undefined {
+  if (!session) return undefined;
+  const { capsule, publicDropMetadata } = session;
+  return {
+    distributionId: capsule.distributionId,
+    title: publicDropMetadata.title,
+    useCase: publicDropMetadata.useCase,
+    network: publicDropMetadata.network,
+    chainId: capsule.chainId,
+    token: capsule.token,
+    tokenOpsAirdrop: capsule.tokenOpsAirdrop,
+    registry: publicDropMetadata.registry,
+    ...(publicDropMetadata.registryDistributionId !== undefined
+      ? { registryDistributionId: publicDropMetadata.registryDistributionId }
+      : {}),
+    recipientCount: publicDropMetadata.recipientCount,
+    recipients: [
+      {
+        wallet: capsule.recipientWallet,
+        note: capsule.note ?? "",
+        amount: capsule.amountLabel ?? "",
+        claimAuthorization: capsule.claimAuthorization,
+        encryptedInput: capsule.encryptedInput,
+        encryptedHandleSummary: `handle ${shortHex(capsule.encryptedInput.handle, 10)} · proof ${(capsule.encryptedInput.inputProof.length - 2) / 2} bytes`,
+      },
+    ],
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* Component                                                            */
 /* ------------------------------------------------------------------ */
@@ -177,12 +215,10 @@ export function RecipientPortal() {
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
 
-  // ---- Imported claim material: PLAIN COMPONENT STATE ONLY. -----------
-  // Never mirrored to any storage, never sent anywhere, never logged.
-  // Gone on refresh — by design (see file header).
-  const [packageText, setPackageText] = useState("");
-  const [validation, setValidation] = useState<PackageValidation | undefined>();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [vaultSession, setVaultSession] = useState<
+    RecipientVaultSession | undefined
+  >();
+  const [sessionChecked, setSessionChecked] = useState(false);
 
   const [ack, setAck] = useState(false);
   const [elig, setElig] = useState<EligState>({ phase: "idle" });
@@ -191,39 +227,22 @@ export function RecipientPortal() {
   const [claim, setClaim] = useState<ClaimState>({ phase: "idle" });
   const [verify, setVerify] = useState<VerifyState>({ phase: "idle" });
 
-  /* ---------------- Package import ---------------------------------- */
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setVaultSession(readVaultClaimSession());
+      setSessionChecked(true);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
-  function handlePackageChange(text: string) {
-    setPackageText(text);
-    // A changed package invalidates every downstream result — old results
-    // described a different package. Honest reset.
-    setElig({ phase: "idle" });
-    setGrant({ phase: "idle" });
-    setDecrypt({ phase: "idle" });
-    setClaim({ phase: "idle" });
-    setVerify({ phase: "idle" });
-
-    if (text.trim().length === 0) {
-      setValidation(undefined);
-      return;
-    }
-    setValidation(validateDistributionPackage(text));
-  }
-
-  function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    // Allow choosing the same file again later.
-    event.target.value = "";
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") handlePackageChange(reader.result);
-    };
-    reader.readAsText(file);
-  }
-
-  const pkg = validation?.ok ? validation.pkg : undefined;
-  const matched = pkg ? matchRecipient(pkg, wallet.address) : undefined;
+  const pkg = useMemo(() => packageFromVaultSession(vaultSession), [vaultSession]);
+  const matched =
+    pkg && wallet.address
+      ? pkg.recipients.find(
+          (recipient) =>
+            recipient.wallet.toLowerCase() === wallet.address?.toLowerCase(),
+        )
+      : undefined;
   const walletMismatch = !!pkg && !!wallet.address && !matched;
   const claimMaterial = matched ? resolveClaimMaterial(matched) : undefined;
   const encryptedInput: EncryptedInput | undefined = claimMaterial?.ok
@@ -239,10 +258,12 @@ export function RecipientPortal() {
     claim.phase === "pending" ||
     verify.phase === "running";
 
-  // ALL action buttons require every one of these — real `disabled`
-  // attributes below AND in-handler refusals (belt and braces).
-  const gatesOk =
-    walletReady && !!publicClient && !!walletClient && packageReady && ack;
+  // ALL action buttons require these base gates — real `disabled` attributes
+  // below AND in-handler refusals (belt and braces). Claim adds the single-use
+  // acknowledgement because it is the irreversible action.
+  const baseGatesOk =
+    walletReady && !!publicClient && !!walletClient && packageReady;
+  const claimGatesOk = baseGatesOk && ack;
 
   const tokenIsCttt = pkg?.token.toLowerCase() === CTTT_TOKEN_ADDRESS.toLowerCase();
 
@@ -252,127 +273,96 @@ export function RecipientPortal() {
       : `${raw.toString()} raw token units`;
   }
 
-  function refusalMessage(): string | undefined {
+  function refusalMessage(options: { requireAck?: boolean } = {}): string | undefined {
     if (!walletReady) return "Connect your wallet on Sepolia first.";
     if (!publicClient || !walletClient)
       return "Wallet client not ready — reconnect your wallet.";
-    if (!pkg) return "Import a valid claim package first.";
+    if (!pkg) return "No claim selected. Open Drops to privately check eligible airdrops.";
     if (!matched) return "The connected wallet is not the recipient for this package.";
     if (!encryptedInput)
-      return "The package's encrypted claim input is missing or failed validation.";
-    if (!ack) return "Confirm the single-use acknowledgement checkbox first.";
+      return "The vault capsule's encrypted claim input is missing or failed validation.";
+    if (options.requireAck && !ack)
+      return "Confirm the single-use acknowledgement checkbox first.";
     return undefined;
   }
 
-  /* ---------------- Action 1 — check eligibility (free) -------------- */
-
-  async function handleCheckEligibility() {
+  async function handleRevealAllocation() {
     if (busy) return;
     const refusal = refusalMessage();
-    if (refusal || !pkg || !matched || !encryptedInput || !publicClient || !wallet.address) {
+    if (
+      refusal ||
+      !pkg ||
+      !matched ||
+      !encryptedInput ||
+      !publicClient ||
+      !walletClient ||
+      !wallet.address
+    ) {
       setElig({ phase: "error", message: refusal ?? "Prerequisites not met." });
       return;
     }
+
+    let stage: "eligibility" | "grant" | "decrypt" = "eligibility";
     setElig({ phase: "running" });
+    setGrant({ phase: "idle" });
+    setDecrypt({ phase: "idle" });
+
     try {
       const client = createAirdropClient({
         publicClient,
         walletClient,
         airdropAddress: pkg.tokenOpsAirdrop,
       });
-      const result = await checkRecipientEligibility({
+      const eligibility = await checkRecipientEligibility({
         client,
         caller: wallet.address,
         encryptedAmountHandle: encryptedInput.handle,
         signature: matched.claimAuthorization,
       });
-      setElig({ phase: "success", result, caller: wallet.address });
-    } catch (error) {
-      setElig({ phase: "error", message: describeRecipientActionError(error) });
-    }
-  }
+      setElig({ phase: "success", result: eligibility, caller: wallet.address });
 
-  /* ---------------- Action 2 — grant decrypt access (paid tx) -------- */
+      if (!eligibility.signatureValid) {
+        setGrant({
+          phase: "error",
+          message:
+            "This claim is not valid for the connected wallet, or it has already been used.",
+        });
+        return;
+      }
+      if (!eligibility.preflight.ready) {
+        setGrant({
+          phase: "error",
+          message: eligibility.preflight.blockers
+            .map((b) => describeRecipientActionError(b))
+            .join(" · "),
+        });
+        return;
+      }
 
-  async function handleGrantAccess() {
-    if (busy) return;
-    const refusal = refusalMessage();
-    if (refusal || !pkg || !matched || !encryptedInput || !publicClient || !walletClient || !wallet.address) {
-      setGrant({ phase: "error", message: refusal ?? "Prerequisites not met." });
-      return;
-    }
-    if (elig.phase !== "success") {
-      setGrant({
-        phase: "error",
-        message: "Check your eligibility first — this step sends a real transaction and should not run blind.",
-      });
-      return;
-    }
-    if (elig.caller.toLowerCase() !== wallet.address.toLowerCase()) {
-      setGrant({
-        phase: "error",
-        message: "Your connected wallet changed since the eligibility check — re-run it first.",
-      });
-      return;
-    }
-    setGrant({ phase: "pending" });
-    try {
-      const client = createAirdropClient({
-        publicClient,
-        walletClient,
-        airdropAddress: pkg.tokenOpsAirdrop,
-      });
-      const result = await grantDecryptAccess({
+      stage = "grant";
+      setGrant({ phase: "pending" });
+      const granted = await grantDecryptAccess({
         client,
         encryptedInput,
         signature: matched.claimAuthorization,
       });
       setGrant({
         phase: "success",
-        handle: result.handle,
-        hash: result.hash,
+        handle: granted.handle,
+        hash: granted.hash,
         caller: wallet.address,
       });
-    } catch (error) {
-      setGrant({ phase: "error", message: describeRecipientActionError(error) });
-    }
-  }
 
-  /* ---------------- Action 3 — decrypt allocation (free) ------------- */
-
-  async function handleDecrypt() {
-    if (busy) return;
-    const refusal = refusalMessage();
-    if (refusal || !pkg || !matched || !publicClient || !walletClient || !wallet.address) {
-      setDecrypt({ phase: "error", message: refusal ?? "Prerequisites not met." });
-      return;
-    }
-    if (grant.phase !== "success") {
-      setDecrypt({
-        phase: "error",
-        message: "Grant decrypt access first — decryption uses the access that transaction grants.",
-      });
-      return;
-    }
-    if (grant.caller.toLowerCase() !== wallet.address.toLowerCase()) {
-      setDecrypt({
-        phase: "error",
-        message: "Your connected wallet changed since access was granted — reconnect the recipient wallet.",
-      });
-      return;
-    }
-    setDecrypt({ phase: "running" });
-    try {
+      stage = "decrypt";
+      setDecrypt({ phase: "running" });
       const bundle = getBrowserFheBundle({ publicClient, walletClient });
       const valueRaw = await decryptAllocationHandle({
         zama: bundle.zama,
-        handle: grant.handle,
+        handle: granted.handle,
         airdropAddress: pkg.tokenOpsAirdrop,
-        // One permit signature also covers the post-claim balance decrypt.
         alsoAllowContracts: [pkg.token],
       });
-      // Real computed comparison against the package's plaintext amount —
-      // only asserted when the token is CTTT (known 6 decimals).
+
       let expectedRaw: bigint | undefined;
       if (tokenIsCttt && /^\d+(\.\d+)?$/.test(matched.amount)) {
         expectedRaw = toRawUnits(matched.amount, CTTT_DECIMALS);
@@ -380,7 +370,14 @@ export function RecipientPortal() {
       const matches = expectedRaw !== undefined ? valueRaw === expectedRaw : undefined;
       setDecrypt({ phase: "success", valueRaw, expectedRaw, matches });
     } catch (error) {
-      setDecrypt({ phase: "error", message: describeRecipientActionError(error) });
+      const message = describeRecipientActionError(error);
+      if (stage === "eligibility") {
+        setElig({ phase: "error", message });
+      } else if (stage === "grant") {
+        setGrant({ phase: "error", message });
+      } else {
+        setDecrypt({ phase: "error", message });
+      }
     }
   }
 
@@ -388,7 +385,7 @@ export function RecipientPortal() {
 
   async function handleClaim() {
     if (busy) return;
-    const refusal = refusalMessage();
+    const refusal = refusalMessage({ requireAck: true });
     if (refusal || !pkg || !matched || !encryptedInput || !publicClient || !walletClient || !wallet.address) {
       setClaim({ phase: "error", message: refusal ?? "Prerequisites not met." });
       return;
@@ -474,7 +471,7 @@ export function RecipientPortal() {
     }
   }
 
-  /* ---------------- Step timeline (all 9 steps, live statuses) ------- */
+  /* ---------------- Step timeline (simple product flow) -------------- */
 
   function actionStatus(
     phase: "idle" | "running" | "pending" | "success" | "error",
@@ -485,45 +482,79 @@ export function RecipientPortal() {
     return "todo";
   }
 
-  const validateStatus: StepStatus =
-    packageReady
-      ? "done"
-      : (validation && !validation.ok) ||
-          walletMismatch ||
-          (claimMaterial && !claimMaterial.ok)
-        ? "error"
+  const packageInvalid = !!claimMaterial && !claimMaterial.ok;
+  const packageStepStatus: StepStatus = packageReady
+    ? "done"
+    : packageInvalid || walletMismatch
+      ? "error"
+      : pkg
+        ? "running"
         : "todo";
+  const revealStatus: StepStatus =
+    decrypt.phase === "success"
+      ? "done"
+      : elig.phase === "error" || grant.phase === "error" || decrypt.phase === "error"
+        ? "error"
+        : elig.phase === "running" ||
+            grant.phase === "pending" ||
+            decrypt.phase === "running"
+          ? "running"
+          : "todo";
 
   const steps: { label: string; status: StepStatus; note?: string }[] = [
-    { label: "Connect wallet", status: wallet.isConnected ? "done" : "todo" },
-    { label: "Switch to Sepolia", status: wallet.isOnSepolia ? "done" : "todo" },
     {
-      label: "Import claim package",
-      status: packageText.trim().length > 0 ? "done" : "todo",
+      label: "Connect wallet",
+      status: walletReady
+        ? "done"
+        : wallet.isConnected && !wallet.isOnSepolia
+          ? "error"
+          : "todo",
     },
-    { label: "Validate package", status: validateStatus },
-    { label: "Check eligibility", status: actionStatus(elig.phase), note: "free" },
-    {
-      label: "Grant decrypt access",
-      status: actionStatus(grant.phase),
-      note: "1 transaction",
-    },
-    {
-      label: "Decrypt allocation",
-      status: actionStatus(decrypt.phase),
-      note: "free · optional preview",
-    },
+    { label: "Claim package detected", status: packageStepStatus },
+    { label: "Reveal my allocation", status: revealStatus, note: "eligibility + decrypt" },
     {
       label: "Claim allocation",
       status: actionStatus(claim.phase),
-      note: "1 transaction · single-use",
+      note: "single-use",
     },
     {
-      label: "Verify confidential balance",
+      label: "Verify balance",
       status: actionStatus(verify.phase),
       note: "free",
     },
   ];
+
+  const packageStatusLabel = packageInvalid
+    ? "Invalid package"
+    : walletMismatch
+      ? "Wallet mismatch"
+      : pkg
+        ? "Detected"
+        : "Waiting for package";
+  const packageStatusTone =
+    packageInvalid || walletMismatch ? "pending" : pkg ? "proven" : "neutral";
+  const packageStatusTitle = packageInvalid
+    ? "Invalid package"
+    : walletMismatch
+      ? "Package found, but this wallet is not the recipient."
+      : pkg && wallet.address
+        ? "Claim package detected"
+        : pkg
+          ? "Claim package detected. Connect wallet to continue."
+          : "No claim selected";
+  const packageStatusDescription = packageInvalid
+    ? "The Claim Vault capsule could not be prepared for this wallet."
+    : pkg
+      ? "Claim material was released from VantaDrop's encrypted Claim Vault to this verified wallet. It is not stored in the public registry."
+      : sessionChecked
+        ? "No claim selected. Open Drops to privately check eligible airdrops."
+        : "Checking for a vault claim package...";
+  const packageHasClaimAuthorization = !!pkg?.recipients.some(
+    (recipient) => !!recipient.claimAuthorization,
+  );
+  const packageHasEncryptedInput = !!pkg?.recipients.some(
+    (recipient) => !!recipient.encryptedInput?.handle && !!recipient.encryptedInput?.inputProof,
+  );
 
   const claimComplete = claim.phase === "success" && verify.phase === "success";
 
@@ -532,17 +563,17 @@ export function RecipientPortal() {
   /* ---------------------------------------------------------------- */
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
+    <div className="page-section-tight">
       {/* -------- Header -------- */}
       <SectionLabel>Recipient portal</SectionLabel>
-      <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">
+      <h1 className="mt-3 max-w-5xl text-[clamp(38px,5vw,78px)] font-semibold leading-[0.96] tracking-[-0.075em] text-white">
         Claim your confidential allocation
       </h1>
-      <p className="mt-3 text-[15px] leading-relaxed text-zinc-400">
+      <p className="mt-5 max-w-3xl text-[15px] leading-relaxed text-zinc-400">
         Someone sent you a confidential token allocation through VantaDrop. Your
-        amount is encrypted on-chain — only you can decrypt it, and only you can
-        claim it. Import the claim package your sender shared with you, then walk
-        through the steps below at your own pace. Nothing runs automatically.
+        amount is encrypted on-chain. Connect your wallet to privately check this
+        claim, reveal your allocation, claim it, and verify your confidential
+        balance. Nothing runs automatically.
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <Badge tone="confidential">Amounts encrypted end-to-end</Badge>
@@ -553,7 +584,7 @@ export function RecipientPortal() {
       {/* -------- Step timeline -------- */}
       <Card className="mt-8 p-5">
         <h2 className="text-sm font-semibold text-white">Your progress</h2>
-        <ol className="mt-4 grid gap-2.5 sm:grid-cols-3">
+        <ol className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
           {steps.map((step, i) => (
             <li key={step.label} className="flex items-center gap-2.5">
               <StepDot status={step.status} index={i + 1} />
@@ -578,88 +609,52 @@ export function RecipientPortal() {
         </ol>
       </Card>
 
-      {/* -------- 1 & 2 · Wallet -------- */}
+      {/* -------- Wallet -------- */}
       <div className="mt-10">
-        <SectionLabel>Step 1 · Connect on Sepolia</SectionLabel>
+        <SectionLabel>Step 1 · Connect wallet</SectionLabel>
         <div className="mt-3">
           <WalletStatusBar />
         </div>
         {!walletReady && (
           <p className="mt-2 text-[13px] text-zinc-500">
             Connect the exact wallet your sender allocated tokens to, on Sepolia
-            (chain id {SEPOLIA_CHAIN_ID}). The package below can only be used by
-            that wallet.
+            (chain id {SEPOLIA_CHAIN_ID}). Only the matching recipient wallet can
+            use this claim.
           </p>
         )}
       </div>
 
-      {/* -------- 3 & 4 · Import + validate package -------- */}
+      {/* -------- Claim package status -------- */}
       <div className="mt-10">
-        <SectionLabel>Step 2 · Import your claim package</SectionLabel>
+        <SectionLabel>Step 2 · Claim package detected</SectionLabel>
         <Card className="mt-3 p-5">
-          <p className="text-[14px] font-medium leading-relaxed text-zinc-200">
-            Your sender privately shares this claim package with you. It is not
-            stored in the public registry.
-          </p>
-          <p className="mt-1.5 text-[13px] leading-relaxed text-zinc-500">
-            Paste the package JSON below, or upload the file if your sender sent
-            one. It stays in this page&apos;s memory only — it is never uploaded,
-            never stored, never logged, and is gone when you refresh.
-          </p>
-
-          <textarea
-            value={packageText}
-            onChange={(e) => handlePackageChange(e.target.value)}
-            rows={6}
-            spellCheck={false}
-            placeholder='{"distributionId":"…","network":"Sepolia","chainId":11155111,…}'
-            className="mt-4 w-full rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-[12px] text-zinc-200 placeholder:text-zinc-600 focus:border-violet-500/50 focus:outline-none"
-            aria-label="Claim package JSON"
-          />
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json,application/json,text/plain"
-              onChange={handleFileUpload}
-              className="hidden"
-              aria-hidden="true"
-              tabIndex={-1}
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-[13px] font-medium text-zinc-200 transition hover:bg-white/10"
-            >
-              Upload JSON file
-            </button>
-            {packageText.trim().length > 0 && (
-              <button
-                type="button"
-                onClick={() => handlePackageChange("")}
-                className="text-[13px] text-zinc-500 underline decoration-white/20 underline-offset-4 transition hover:text-zinc-300"
-              >
-                Clear
-              </button>
-            )}
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-[15px] font-semibold text-white">
+                  Claim package
+                </h2>
+                <Badge tone={packageStatusTone}>{packageStatusLabel}</Badge>
+              </div>
+              <p className="mt-2 text-[14px] font-medium leading-relaxed text-zinc-200">
+                {packageStatusTitle}
+              </p>
+              <p className="mt-1 text-[13px] leading-relaxed text-zinc-500">
+                {packageStatusDescription}
+              </p>
+            </div>
+            <Badge tone="confidential">Claim Vault</Badge>
           </div>
 
-          {/* Per-field validation errors — specific, not generic. */}
-          {validation && !validation.ok && (
-            <div className="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-4">
-              <p className="text-[13px] font-semibold text-amber-200">
-                This package has {validation.errors.length} problem
-                {validation.errors.length === 1 ? "" : "s"}:
+          {!pkg && sessionChecked && (
+            <div className="mt-4 rounded-lg border border-white/[0.06] bg-white/[0.02] p-4">
+              <p className="text-[13px] leading-relaxed text-zinc-400">
+                No claim selected. Open Drops to privately check eligible
+                airdrops.
               </p>
-              <ul className="mt-2 space-y-1.5">
-                {validation.errors.map((err) => (
-                  <li key={`${err.field}:${err.message}`} className="text-[13px] leading-relaxed text-amber-200/90">
-                    <span className="font-mono text-[12px] text-amber-300">{err.field}</span>
-                    {" — "}
-                    {err.message}
-                  </li>
-                ))}
-              </ul>
+              <Link href="/drops" className="mt-3 inline-flex btn-primary px-4 py-2 text-[13px]">
+                Go to Drops
+              </Link>
             </div>
           )}
 
@@ -668,59 +663,67 @@ export function RecipientPortal() {
             <div className="mt-4 border-t border-white/[0.05] pt-3">
               <ul className="space-y-2">
                 <li className="flex items-center gap-2.5 text-[13px] text-zinc-300">
-                  <Badge tone="proven">✓</Badge> Package loaded — “{pkg.title}”
+                  <Badge tone="proven">OK</Badge> Claim package detected
+                  <span className="text-zinc-500">{pkg.title}</span>
                 </li>
                 <li className="flex items-center gap-2.5 text-[13px] text-zinc-300">
                   {!wallet.address ? (
                     <>
                       <Badge tone="neutral">·</Badge>
                       <span className="text-zinc-500">
-                        Connect your wallet to check this package is addressed to you
+                        Recipient match waiting for wallet
                       </span>
                     </>
                   ) : walletMismatch ? (
                     <>
                       <Badge tone="pending">✕</Badge>
                       <span className="font-medium text-rose-300">
-                        Connected wallet is not the recipient for this package.
+                        Package found, but this wallet is not the recipient.
                       </span>
                     </>
                   ) : (
                     <>
-                      <Badge tone="proven">✓</Badge> Recipient matched — this package is
-                      addressed to your connected wallet
+                      <Badge tone="proven">OK</Badge> Recipient matched
                     </>
                   )}
                 </li>
-                {matched && (
-                  <>
-                    <li className="flex items-center gap-2.5 text-[13px] text-zinc-300">
-                      <Badge tone="proven">✓</Badge> Claim authorization present
-                    </li>
-                    <li className="flex items-center gap-2.5 text-[13px] text-zinc-300">
-                      {claimMaterial?.ok ? (
-                        <>
-                          <Badge tone="proven">✓</Badge> Encrypted input present
-                        </>
-                      ) : (
-                        <>
-                          <Badge tone="pending">✕</Badge>
-                          <span className="text-amber-300">{claimMaterial?.error}</span>
-                        </>
-                      )}
-                    </li>
-                    <li className="flex items-center gap-2.5 text-[13px] text-zinc-300">
-                      <Badge tone="confidential">🔒</Badge> Allocation private until you
-                      decrypt it
-                    </li>
-                  </>
-                )}
+                <li className="flex items-center gap-2.5 text-[13px] text-zinc-300">
+                  {packageHasClaimAuthorization ? (
+                    <>
+                      <Badge tone="proven">OK</Badge> Claim authorization present
+                    </>
+                  ) : (
+                    <>
+                      <Badge tone="pending">Missing</Badge> Claim authorization missing
+                    </>
+                  )}
+                </li>
+                <li className="flex items-center gap-2.5 text-[13px] text-zinc-300">
+                  {claimMaterial && !claimMaterial.ok ? (
+                    <>
+                      <Badge tone="pending">Check</Badge>
+                      <span className="text-amber-300">{claimMaterial.error}</span>
+                    </>
+                  ) : packageHasEncryptedInput ? (
+                    <>
+                      <Badge tone="proven">OK</Badge> Encrypted input present
+                    </>
+                  ) : (
+                    <>
+                      <Badge tone="pending">Missing</Badge> Encrypted input missing
+                    </>
+                  )}
+                </li>
+                <li className="flex items-center gap-2.5 text-[13px] text-zinc-300">
+                  <Badge tone="confidential">Private</Badge> Your allocation stays private
+                  until your wallet decrypts it.
+                </li>
               </ul>
 
               {/* Optional technical disclosure — truncated values only. */}
               <details className="mt-4 rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-3">
                 <summary className="cursor-pointer select-none text-[13px] font-medium text-zinc-400 transition hover:text-zinc-200">
-                  Advanced details
+                  Advanced proof details
                 </summary>
                 <div className="mt-2">
                   <KeyValueRow label="Distribution title (public)">{pkg.title}</KeyValueRow>
@@ -733,7 +736,7 @@ export function RecipientPortal() {
                   <KeyValueRow label="Network">
                     Sepolia (chain id {pkg.chainId})
                   </KeyValueRow>
-                  <KeyValueRow label="Recipients in package">
+                  <KeyValueRow label="Recipients in drop">
                     {pkg.recipients.length}
                   </KeyValueRow>
                   {pkg.registryDistributionId !== undefined && (
@@ -801,10 +804,11 @@ export function RecipientPortal() {
               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-400" />
               <p className="text-[13px] leading-relaxed text-zinc-400">
                 <span className="font-medium text-zinc-200">
-                  Your claim package was shared privately, out-of-band.
+                  Claim material is released through the encrypted Claim Vault.
                 </span>{" "}
-                Your sender delivered it to you directly. This page never uploads it
-                anywhere — it lives only in this browser tab&apos;s memory.
+                The backend stores encrypted capsules at rest and releases this
+                capsule only after wallet-ownership verification for the matching
+                recipient wallet.
               </p>
             </li>
             <li className="flex gap-3">
@@ -832,62 +836,68 @@ export function RecipientPortal() {
         </Card>
       </div>
 
-      {/* -------- Acknowledgement -------- */}
-      <div className="mt-10">
-        <SectionLabel>Before you act</SectionLabel>
-        <Card className="mt-3 p-5">
-          <label className="flex cursor-pointer items-start gap-3 text-[14px] text-zinc-200">
-            <input
-              type="checkbox"
-              checked={ack}
-              onChange={(e) => setAck(e.target.checked)}
-              className="mt-0.5 h-4 w-4 accent-violet-500"
-            />
-            <span>
-              I understand this claim can only be used once.
-              <span className="block text-[12px] leading-relaxed text-zinc-500">
-                The action buttons below stay disabled until your wallet is connected
-                on Sepolia, a valid package addressed to your wallet is imported, and
-                this box is checked.
-              </span>
-            </span>
-          </label>
-          <p className="mt-4 border-t border-white/[0.05] pt-3 text-[13px] leading-relaxed text-zinc-500">
-            Checking eligibility, decrypting, and verifying your balance are free
-            (your first decrypt adds one free signature prompt). Granting decrypt
-            access is a real Sepolia transaction that does <em>not</em> use up your
-            claim. Claiming is the one irreversible action: it consumes your
-            single-use authorization forever.
-          </p>
-        </Card>
-      </div>
-
       {/* -------- Actions -------- */}
       <div className="mt-10">
         <SectionLabel>Step 3 · Claim your allocation</SectionLabel>
 
-        {/* Action 1 — eligibility */}
+        {/* Button 1 — reveal allocation */}
         <Card className="mt-3 p-5">
           <h3 className="text-[14px] font-semibold text-zinc-100">
-            Check eligibility <span className="ml-1.5 font-normal text-zinc-500">— free</span>
+            Reveal my allocation
+            <span className="ml-1.5 font-normal text-zinc-500">
+              — checks eligibility, grants decrypt access, then decrypts
+            </span>
           </h3>
           <p className="mt-1 text-[13px] leading-relaxed text-zinc-500">
-            Confirms your claim authorization is valid and unclaimed, the claim
-            window is open, and shows the exact claim fee. Read-only — no
-            transaction, no cost.
+            Your allocation stays private until your wallet decrypts it. This
+            sequence checks the claim, sends the decrypt-access transaction, and
+            reveals the amount only in your browser.
           </p>
           <div className="mt-3.5">
             <button
               type="button"
-              onClick={handleCheckEligibility}
-              disabled={!gatesOk || busy}
+              onClick={handleRevealAllocation}
+              disabled={!baseGatesOk || busy}
               className={primaryButtonClass}
             >
-              {elig.phase === "running" ? "Checking…" : "Check eligibility"}
+              {elig.phase === "running"
+                ? "Checking eligibility..."
+                : grant.phase === "pending"
+                  ? "Granting decrypt access..."
+                  : decrypt.phase === "running"
+                    ? "Decrypting allocation..."
+                : "Reveal my allocation"}
             </button>
+          </div>
+          <div className="mt-4 grid gap-2 text-[13px] text-zinc-400">
+            <div className="flex items-center gap-2.5">
+              <Badge tone={elig.phase === "success" ? "proven" : elig.phase === "error" ? "pending" : "neutral"}>
+                {elig.phase === "success" ? "Done" : elig.phase === "running" ? "Running" : elig.phase === "error" ? "Check" : "Ready"}
+              </Badge>
+              <span>Checking eligibility</span>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Badge tone={grant.phase === "success" ? "proven" : grant.phase === "error" ? "pending" : grant.phase === "pending" ? "confidential" : "neutral"}>
+                {grant.phase === "success" ? "Done" : grant.phase === "pending" ? "Running" : grant.phase === "error" ? "Check" : "Ready"}
+              </Badge>
+              <span>Granting decrypt access</span>
+              {grant.phase === "success" && <TxLink hash={grant.hash} />}
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Badge tone={decrypt.phase === "success" ? "proven" : decrypt.phase === "error" ? "pending" : decrypt.phase === "running" ? "confidential" : "neutral"}>
+                {decrypt.phase === "success" ? "Done" : decrypt.phase === "running" ? "Running" : decrypt.phase === "error" ? "Check" : "Ready"}
+              </Badge>
+              <span>Decrypting allocation</span>
+            </div>
           </div>
           {elig.phase === "error" && (
             <p className="mt-3 text-[13px] leading-relaxed text-rose-300">{elig.message}</p>
+          )}
+          {grant.phase === "error" && (
+            <p className="mt-3 text-[13px] leading-relaxed text-rose-300">{grant.message}</p>
+          )}
+          {decrypt.phase === "error" && (
+            <p className="mt-3 text-[13px] leading-relaxed text-rose-300">{decrypt.message}</p>
           )}
           {elig.phase === "success" && (
             <div className="mt-3 border-t border-white/[0.05] pt-1">
@@ -916,72 +926,6 @@ export function RecipientPortal() {
               </KeyValueRow>
             </div>
           )}
-        </Card>
-
-        {/* Action 2 — grant decrypt access */}
-        <Card className="mt-3 p-5">
-          <h3 className="text-[14px] font-semibold text-zinc-100">
-            Grant decrypt access{" "}
-            <span className="ml-1.5 font-normal text-zinc-500">
-              — 1 transaction · does not use your claim
-            </span>
-          </h3>
-          <p className="mt-1 text-[13px] leading-relaxed text-zinc-500">
-            Gives your wallet — and only your wallet — permission to decrypt your
-            allocation. This is a real Sepolia transaction (one wallet prompt, real
-            gas) and it does <em>not</em> consume your single-use claim.
-          </p>
-          <div className="mt-3.5">
-            <button
-              type="button"
-              onClick={handleGrantAccess}
-              disabled={!gatesOk || busy || elig.phase !== "success"}
-              className={primaryButtonClass}
-            >
-              {grant.phase === "pending"
-                ? "Waiting for wallet confirmation…"
-                : "Grant decrypt access"}
-            </button>
-          </div>
-          {grant.phase === "error" && (
-            <p className="mt-3 text-[13px] leading-relaxed text-rose-300">{grant.message}</p>
-          )}
-          {grant.phase === "success" && (
-            <div className="mt-3 border-t border-white/[0.05] pt-1">
-              <KeyValueRow label="Status">
-                <span className="inline-flex flex-wrap items-center gap-2">
-                  <Badge tone="proven">Access granted</Badge>
-                  <TxLink hash={grant.hash} />
-                </span>
-              </KeyValueRow>
-            </div>
-          )}
-        </Card>
-
-        {/* Action 3 — decrypt */}
-        <Card className="mt-3 p-5">
-          <h3 className="text-[14px] font-semibold text-zinc-100">
-            Decrypt my allocation{" "}
-            <span className="ml-1.5 font-normal text-zinc-500">— free · optional preview</span>
-          </h3>
-          <p className="mt-1 text-[13px] leading-relaxed text-zinc-500">
-            Decrypts your amount in your browser so you can see it before claiming.
-            Your first decrypt asks for one free signature (a decryption permit) —
-            no transaction, no cost. The plaintext exists only on this screen.
-          </p>
-          <div className="mt-3.5">
-            <button
-              type="button"
-              onClick={handleDecrypt}
-              disabled={!gatesOk || busy || grant.phase !== "success"}
-              className={primaryButtonClass}
-            >
-              {decrypt.phase === "running" ? "Decrypting…" : "Decrypt my allocation"}
-            </button>
-          </div>
-          {decrypt.phase === "error" && (
-            <p className="mt-3 text-[13px] leading-relaxed text-rose-300">{decrypt.message}</p>
-          )}
           {decrypt.phase === "success" && (
             <div className="mt-4 rounded-lg border border-violet-500/30 bg-violet-500/[0.07] px-5 py-4">
               <p className="text-xs uppercase tracking-wider text-violet-300">
@@ -992,12 +936,12 @@ export function RecipientPortal() {
               </p>
               {decrypt.matches === true && (
                 <p className="mt-2 text-[13px] text-emerald-300">
-                  Matches the amount your sender recorded in the package.
+                  Matches the amount label returned in the vault capsule.
                 </p>
               )}
               {decrypt.matches === false && (
                 <p className="mt-2 text-[13px] text-rose-300">
-                  Does not match the package&apos;s recorded amount ({matched?.amount}) —
+                  Does not match the vault capsule&apos;s amount label ({matched?.amount}) —
                   contact your sender before claiming.
                 </p>
               )}
@@ -1009,7 +953,7 @@ export function RecipientPortal() {
           )}
         </Card>
 
-        {/* Action 4 — claim (irreversible) */}
+        {/* Button 2 — claim (irreversible) */}
         <Card className="mt-3 border-rose-500/40 bg-rose-500/[0.06] p-5">
           <h3 className="text-[14px] font-bold text-rose-200">
             Claim allocation{" "}
@@ -1023,11 +967,26 @@ export function RecipientPortal() {
             is no second attempt. This button refuses to send if your latest
             eligibility check reported a problem.
           </p>
+          <label className="mt-4 flex cursor-pointer items-start gap-3 text-[13px] text-rose-100/90">
+            <input
+              type="checkbox"
+              checked={ack}
+              onChange={(e) => setAck(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-rose-500"
+            />
+            <span>
+              I understand this claim can only be used once.
+              <span className="block text-[12px] leading-relaxed text-rose-200/60">
+                Claiming consumes the authorization forever. Reveal and verify
+                do not consume it.
+              </span>
+            </span>
+          </label>
           <div className="mt-3.5">
             <button
               type="button"
               onClick={handleClaim}
-              disabled={!gatesOk || busy || elig.phase !== "success"}
+              disabled={!claimGatesOk || busy || elig.phase !== "success"}
               className={claimButtonClass}
             >
               {claim.phase === "pending"
@@ -1050,7 +1009,7 @@ export function RecipientPortal() {
           )}
         </Card>
 
-        {/* Action 5 — verify */}
+        {/* Button 3 — verify */}
         <Card className="mt-3 p-5">
           <h3 className="text-[14px] font-semibold text-zinc-100">
             Verify confidential balance{" "}
@@ -1064,7 +1023,7 @@ export function RecipientPortal() {
             <button
               type="button"
               onClick={handleVerify}
-              disabled={!gatesOk || busy || claim.phase !== "success"}
+              disabled={!baseGatesOk || busy || claim.phase !== "success"}
               className={primaryButtonClass}
             >
               {verify.phase === "running" ? "Verifying…" : "Verify confidential balance"}

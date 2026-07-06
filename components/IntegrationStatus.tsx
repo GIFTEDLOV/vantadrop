@@ -51,7 +51,7 @@ const serviceLayerPresent =
  * "Proven live" for the public recipient portal means a human ran
  * /recipient/demo itself — the productized product page, not the hidden
  * diagnostic — end-to-end against a funded recipient burner wallet on live
- * Sepolia: package import, eligibility check, getClaimAmount, decrypt, claim,
+ * Sepolia: package load, eligibility check, getClaimAmount, decrypt, claim,
  * and post-claim balance verify all succeeded with real tx hashes and no
  * errors. See docs/research/browser-tokenops-integration.md ("Public
  * recipient portal live test result") for the real tx hashes and the note
@@ -62,7 +62,9 @@ const serviceLayerPresent =
  * now proven live on their actual public pages — not only via hidden
  * diagnostics — the full confidential-distribution app flow is proven live
  * on Sepolia end-to-end. Final UI polish and demo packaging are next; no
- * further functional proof is outstanding for the core lifecycle.
+ * further functional proof is outstanding for the core lifecycle. The public
+ * UX is moving package handling behind Paychain-style Claim Vault discovery;
+ * manual JSON import remains only in hidden diagnostics.
  */
 export function IntegrationStatus() {
   const totalDistributions = useTotalDistributions();
@@ -80,7 +82,8 @@ export function IntegrationStatus() {
         and
         <code className="mx-1 rounded bg-white/5 px-1 py-0.5 text-[12px]">/recipient/demo</code>
         — not only via hidden developer diagnostics. The full app flow is proven live
-        on Sepolia; final UI polish and demo packaging are next.
+        on Sepolia. The product path now uses Claim Vault discovery; manual package
+        import remains only in hidden developer diagnostics.
       </p>
       <KeyValueRow label="Wallet foundation">
         <Badge tone="proven">Ready</Badge>

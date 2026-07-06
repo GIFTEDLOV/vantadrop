@@ -10,23 +10,23 @@ import {
 import { AddressLink, Badge, Card, KeyValueRow, TxLink } from "./ui";
 
 /**
- * Live Verification panel: every address and tx hash here is real, public
- * Sepolia data from the proven spike run (scripts/spike-tokenops-sepolia.ts).
- * Standalone at /verification and embedded on /drop/demo.
+ * Live verification panel: every address and tx hash here is public Sepolia
+ * data from the proven VantaDrop flow.
  */
 export function VerificationPanel({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="space-y-4">
+    <div className="grid gap-4">
       <Card className="p-6">
         <h3 className="mb-1 text-sm font-semibold text-white">Stack</h3>
         <p className="mb-3 text-[13px] text-zinc-500">
-          What this distribution runs on — all pre-deployed, audited TokenOps infrastructure.
+          Pre-deployed TokenOps infrastructure plus the pinned Zama browser SDK.
         </p>
         <KeyValueRow label="Network">Sepolia (chain id 11155111)</KeyValueRow>
-        <KeyValueRow label="SDK">
-          <span className="font-mono text-[13px]">
-            {TOKENOPS_SDK_VERSION} · {ZAMA_SDK_VERSION}
-          </span>
+        <KeyValueRow label="TokenOps SDK">
+          <span className="font-mono text-[13px]">{TOKENOPS_SDK_VERSION}</span>
+        </KeyValueRow>
+        <KeyValueRow label="Zama FHE SDK">
+          <span className="font-mono text-[13px]">{ZAMA_SDK_VERSION}</span>
         </KeyValueRow>
         <KeyValueRow label="Token standard">ERC-7984 confidential token</KeyValueRow>
         <KeyValueRow label="Distribution type">Confidential Airdrop</KeyValueRow>
@@ -35,9 +35,9 @@ export function VerificationPanel({ compact = false }: { compact?: boolean }) {
       <Card className="p-6">
         <h3 className="mb-1 text-sm font-semibold text-white">Contracts</h3>
         <p className="mb-3 text-[13px] text-zinc-500">
-          Verify each address independently on Etherscan.
+          Verify each public address independently on Etherscan.
         </p>
-        <KeyValueRow label="VantaDrop registry">
+        <KeyValueRow label="VantaDropRegistry">
           <AddressLink address={REGISTRY_ADDRESS} />
         </KeyValueRow>
         <KeyValueRow label="TokenOps airdrop factory">
@@ -52,25 +52,24 @@ export function VerificationPanel({ compact = false }: { compact?: boolean }) {
       </Card>
 
       <Card className="p-6">
-        <div className="mb-1 flex items-center gap-3">
+        <div className="mb-1 flex flex-wrap items-center gap-3">
           <h3 className="text-sm font-semibold text-white">Proven on Sepolia</h3>
           <Badge tone="proven">Proven live</Badge>
         </div>
         <p className="mb-3 text-[13px] text-zinc-500">
-          These four transactions were executed live against Sepolia by the end-to-end spike
-          (scripts/spike-tokenops-sepolia.ts) — mint, create+fund, recipient self-decryption,
-          and claim. Each hash is clickable and independently verifiable.
+          These links are real Sepolia records: mint, create and fund, recipient
+          decrypt access, claim, and registry deployment.
         </p>
-        <KeyValueRow label="1 · Mint confidential CTTT (faucet)">
+        <KeyValueRow label="1. Mint confidential CTTT">
           <TxLink hash={TX.mintConfidential} />
         </KeyValueRow>
-        <KeyValueRow label="2 · Create + fund confidential airdrop">
+        <KeyValueRow label="2. Create + fund confidential airdrop">
           <TxLink hash={TX.createAndFundConfidentialAirdrop} />
         </KeyValueRow>
-        <KeyValueRow label="3 · getClaimAmount (recipient decrypt access)">
+        <KeyValueRow label="3. getClaimAmount decrypt access">
           <TxLink hash={TX.getClaimAmount} />
         </KeyValueRow>
-        <KeyValueRow label="4 · Claim (confidential transfer)">
+        <KeyValueRow label="4. Claim confidential transfer">
           <TxLink hash={TX.claim} />
         </KeyValueRow>
         {!compact && (
@@ -82,17 +81,20 @@ export function VerificationPanel({ compact = false }: { compact?: boolean }) {
 
       <Card className="p-6">
         <h3 className="mb-3 text-sm font-semibold text-white">Capability status</h3>
-        <KeyValueRow label="Recipient self-decryption of allocation">
+        <KeyValueRow label="Browser issuer flow (/create)">
           <Badge tone="proven">Proven live</Badge>
         </KeyValueRow>
-        <KeyValueRow label="Claim (confidential value transfer)">
+        <KeyValueRow label="Browser recipient decrypt/claim">
           <Badge tone="proven">Proven live</Badge>
         </KeyValueRow>
-        <KeyValueRow label="Browser wallet connect + Sepolia detection">
-          <Badge tone="neutral">Live in this UI</Badge>
+        <KeyValueRow label="Public recipient portal (/recipient/demo)">
+          <Badge tone="proven">Proven live</Badge>
         </KeyValueRow>
-        <KeyValueRow label="Browser TokenOps execution from this UI">
-          <Badge tone="pending">Wiring pending — next phase</Badge>
+        <KeyValueRow label="Paychain-style Claim Vault discovery">
+          <Badge tone="demo">Productized path</Badge>
+        </KeyValueRow>
+        <KeyValueRow label="VantaDropRegistry frontend writes">
+          <Badge tone="proven">Proven live</Badge>
         </KeyValueRow>
       </Card>
     </div>

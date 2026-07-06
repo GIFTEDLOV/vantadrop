@@ -50,7 +50,6 @@ import {
   REGISTRY_ADDRESS,
   SEPOLIA_CHAIN_ID,
   TOKENOPS_AIRDROP_FACTORY,
-  etherscanAddress,
   shortHex,
 } from "../../lib/constants";
 import { formatRawUnits, toRawUnits, type CsvParseResult } from "../../lib/csv";
@@ -58,6 +57,11 @@ import {
   saveDistributionPackage,
   type DistributionPackage,
 } from "../../lib/distribution";
+import type {
+  ClaimVaultCapsuleInput,
+  ClaimVaultCapsulesResponse,
+  PublicDropMetadata,
+} from "../../lib/claimVault/types";
 import { getBrowserFheBundle } from "../../lib/tokenops/browser";
 import {
   createAndFundAirdrop,
@@ -103,7 +107,8 @@ type TimelineStepId =
   | "encrypting-allocations"
   | "creating-and-funding"
   | "signing-claims"
-  | "registering-metadata";
+  | "registering-metadata"
+  | "storing-claim-vault";
 
 type ExecutionPhase = "idle" | TimelineStepId | "completed" | "failed";
 
@@ -126,7 +131,18 @@ const STEP_LABELS: Record<TimelineStepId, string> = {
   "encrypting-allocations": "Encrypt recipient allocations (free, relayer)",
   "signing-claims": "Sign claim authorizations (free, 1 signature per recipient)",
   "registering-metadata": "Register public metadata in VantaDropRegistry (1 tx)",
+  "storing-claim-vault": "Store encrypted claim capsules in Claim Vault",
 };
+
+type ClaimVaultStoreOutcome =
+  | {
+      status: "stored";
+      storedCount: number;
+      provider: "upstash" | "memory" | "none";
+      persistent: boolean;
+    }
+  | { status: "not-configured"; message: string }
+  | { status: "error"; message: string };
 
 interface ExecutionOutcome {
   airdrop: Address;
@@ -136,8 +152,11 @@ interface ExecutionOutcome {
   registryId?: number;
   /** Set when steps 5–8 succeeded but the registry write failed (partial success). */
   registryError?: string;
+  vault: ClaimVaultStoreOutcome;
   pkg: DistributionPackage;
 }
+
+type ClaimVaultApiError = { error?: string; code?: string };
 
 /* ------------------------------------------------------------------ */
 /* Error translation — SDK typed codes first, viem/generic fallback    */
@@ -146,6 +165,21 @@ interface ExecutionOutcome {
 function firstLine(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.split("\n")[0];
+}
+
+function isClaimVaultApiError(body: unknown): body is ClaimVaultApiError {
+  return typeof body === "object" && body !== null;
+}
+
+function claimVaultApiErrorMessage(body: unknown, fallback: string): string {
+  if (
+    isClaimVaultApiError(body) &&
+    typeof body.error === "string" &&
+    body.error.length > 0
+  ) {
+    return body.error;
+  }
+  return fallback;
 }
 
 /**
@@ -197,8 +231,102 @@ function describeExecutionError(error: unknown, stepId: TimelineStepId): string 
     "encrypting-allocations": "Allocation encryption failed",
     "signing-claims": "Claim signing failed",
     "registering-metadata": "Registry metadata registration failed",
+    "storing-claim-vault": "Claim Vault storage failed",
   };
   return `${context[stepId]}: ${firstLine(error)}`;
+}
+
+function publicDropMetadataFromPackage(pkg: DistributionPackage): PublicDropMetadata {
+  return {
+    distributionId: pkg.distributionId,
+    ...(pkg.registryDistributionId !== undefined
+      ? { registryDistributionId: pkg.registryDistributionId }
+      : {}),
+    title: pkg.title,
+    useCase: pkg.useCase,
+    status: "active",
+    privacyMode: "discoverable",
+    token: pkg.token,
+    tokenOpsAirdrop: pkg.tokenOpsAirdrop,
+    registry: pkg.registry,
+    recipientCount: pkg.recipientCount,
+    createdAt: pkg.createdAt,
+    startsAt: pkg.createdAt,
+    endsAt: pkg.createdAt + CLAIM_WINDOW_SECONDS * 1000,
+    network: pkg.network,
+    chainId: pkg.chainId,
+  };
+}
+
+function claimVaultCapsulesFromPackage(
+  pkg: DistributionPackage,
+): ClaimVaultCapsuleInput[] {
+  return pkg.recipients.map((recipient) => ({
+    recipientWallet: recipient.wallet,
+    claimAuthorization: recipient.claimAuthorization,
+    encryptedInput: recipient.encryptedInput,
+    token: pkg.token,
+    tokenOpsAirdrop: pkg.tokenOpsAirdrop,
+    chainId: pkg.chainId,
+    distributionId: pkg.distributionId,
+    ...(recipient.amount ? { amountLabel: recipient.amount } : {}),
+    ...(recipient.note ? { note: recipient.note } : {}),
+  }));
+}
+
+async function storePackageInClaimVault(
+  pkg: DistributionPackage,
+): Promise<ClaimVaultStoreOutcome> {
+  try {
+    const response = await fetch("/api/claim-vault/capsules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        publicDropMetadata: publicDropMetadataFromPackage(pkg),
+        recipientCapsules: claimVaultCapsulesFromPackage(pkg),
+      }),
+    });
+
+    const body = (await response.json()) as
+      | ClaimVaultCapsulesResponse
+      | ClaimVaultApiError;
+
+    if (!response.ok) {
+      if (
+        response.status === 503 &&
+        isClaimVaultApiError(body) &&
+        body.code === "CLAIM_VAULT_NOT_CONFIGURED"
+      ) {
+        return {
+          status: "not-configured",
+          message: claimVaultApiErrorMessage(
+            body,
+            "Claim Vault is not configured in this environment.",
+          ),
+        };
+      }
+      return {
+        status: "error",
+        message: claimVaultApiErrorMessage(
+          body,
+          `Claim Vault request failed with HTTP ${response.status}.`,
+        ),
+      };
+    }
+
+    const result = body as ClaimVaultCapsulesResponse;
+    return {
+      status: "stored",
+      storedCount: result.storedCount,
+      provider: result.storage.provider,
+      persistent: result.storage.persistent,
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: firstLine(error),
+    };
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -226,7 +354,6 @@ export function ExecuteStep({
   const [partialAirdrop, setPartialAirdrop] = useState<
     { airdrop: Address; hash: Hex } | undefined
   >();
-  const [copied, setCopied] = useState<"package" | "instructions" | undefined>();
 
   const running =
     phase !== "idle" && phase !== "completed" && phase !== "failed";
@@ -308,7 +435,6 @@ export function ExecuteStep({
     setTimeline([]);
     setOutcome(undefined);
     setPartialAirdrop(undefined);
-    setCopied(undefined);
 
     let currentStep: TimelineStepId = "checking-operator";
     // Captured locally (not via React state) so the async run can read it
@@ -480,6 +606,10 @@ export function ExecuteStep({
       currentStep = "registering-metadata";
       setPhase("registering-metadata");
       pushStep("registering-metadata", "Confirm the prompt in your wallet…");
+      let completedPkg = pkg;
+      let registryHash: Hex | undefined;
+      let registryId: number | undefined;
+      let registryErrorMessage: string | undefined;
       try {
         // PRIVACY — deliberate and load-bearing: this on-chain write receives
         // ONLY public metadata: token, clone address, title, use case,
@@ -511,14 +641,9 @@ export function ExecuteStep({
           txHashes: { ...pkg.txHashes, registry: registered.hash },
         };
         saveDistributionPackage(finalPkg);
-        setOutcome({
-          airdrop: created.airdrop,
-          createHash: created.hash,
-          operatorHash: pkg.txHashes.operatorApproval,
-          registryHash: registered.hash,
-          registryId: Number(registered.id),
-          pkg: finalPkg,
-        });
+        completedPkg = finalPkg;
+        registryHash = registered.hash;
+        registryId = Number(registered.id);
       } catch (registryError) {
         // Registry failure is NOT a distribution failure. The TokenOps
         // airdrop is created, funded, and fully signed — the registry is
@@ -532,50 +657,48 @@ export function ExecuteStep({
           status: "error",
           errorMessage: message,
         });
-        setOutcome({
-          airdrop: created.airdrop,
-          createHash: created.hash,
-          operatorHash: pkg.txHashes.operatorApproval,
-          registryError: message,
-          pkg,
+        registryErrorMessage = message;
+      }
+
+      /* ---- 8. storing-claim-vault (server encrypted, no tx) ---------- */
+      currentStep = "storing-claim-vault";
+      setPhase("storing-claim-vault");
+      pushStep(
+        "storing-claim-vault",
+        "Sending recipient capsules to the encrypted Claim Vault…",
+      );
+      const vault = await storePackageInClaimVault(completedPkg);
+      if (vault.status === "stored") {
+        updateStep("storing-claim-vault", {
+          status: "success",
+          detail: `Claim Vault stored ${vault.storedCount} capsule${vault.storedCount === 1 ? "" : "s"} (${vault.persistent ? "persistent" : "local development memory"})`,
+        });
+      } else {
+        updateStep("storing-claim-vault", {
+          status: "error",
+          errorMessage:
+            vault.status === "not-configured"
+              ? "Claim Vault is not configured in this environment."
+              : vault.message,
         });
       }
+
+      setOutcome({
+        airdrop: created.airdrop,
+        createHash: created.hash,
+        operatorHash: completedPkg.txHashes.operatorApproval,
+        registryHash,
+        registryId,
+        registryError: registryErrorMessage,
+        vault,
+        pkg: completedPkg,
+      });
       setPhase("completed");
     } catch (error) {
       const message = describeExecutionError(error, currentStep);
       updateStep(currentStep, { status: "error", errorMessage: message });
       setPhase("failed");
     }
-  }
-
-  async function copyText(kind: "package" | "instructions", text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(kind);
-      setTimeout(() => setCopied(undefined), 2000);
-    } catch {
-      // Clipboard unavailable — the JSON/instructions remain viewable via the
-      // package in localStorage; nothing to fake here.
-    }
-  }
-
-  function recipientInstructions(o: ExecutionOutcome): string {
-    return [
-      `You have a confidential token allocation waiting in "${o.pkg.title}" (VantaDrop, Sepolia testnet).`,
-      "",
-      `Airdrop contract (TokenOps confidential airdrop clone): ${o.airdrop}`,
-      `View on Etherscan: ${etherscanAddress(o.airdrop)}`,
-      `Token: ${o.pkg.token}`,
-      "",
-      "Your allocation amount is encrypted on-chain — only you will be able to decrypt it.",
-      "",
-      "How to claim:",
-      "1. Ask the sender for your claim package (a JSON file/text they exported when creating this distribution — it is shared privately, never published).",
-      "2. Open the sender's VantaDrop recipient portal at /recipient/demo in a browser with your wallet, connected to Sepolia.",
-      "3. Import the claim package (paste or upload), then follow the on-page steps: check eligibility, grant decrypt access, optionally decrypt your amount, and claim.",
-      "",
-      "IMPORTANT: your claim authorization is single-use. Keep the claim package private and only use it with the exact wallet address it was issued to.",
-    ].join("\n");
   }
 
   /* ---------------------------------------------------------------- */
@@ -824,58 +947,58 @@ export function ExecuteStep({
               <p className="mt-2 text-amber-200/90">
                 This does NOT affect the distribution itself — the registry is optional
                 public metadata, never the source of truth. Your airdrop clone is live
-                and fully signed; share the clone address and package below directly.
+                and fully signed. Claim Vault storage status is shown below.
               </p>
             </div>
           )}
 
           <p className="mt-4 rounded-lg border border-violet-500/25 bg-violet-500/[0.06] px-4 py-3 text-[13px] leading-relaxed text-violet-200">
-            The full distribution package (recipient list, amounts, notes, claim
-            authorizations, and each recipient&apos;s full encrypted allocation input) was
-            saved to your browser&apos;s local storage — this is not on-chain and not
-            shared with anyone. Only the public metadata above (title, use case,
-            addresses, recipient count) exists on-chain.
+            Claim material is stored in VantaDrop&apos;s encrypted Claim Vault and released
+            only to the matching wallet after wallet-ownership verification. The public
+            registry stores metadata only.
           </p>
 
-          <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.08] px-4 py-3 text-[13px] font-medium leading-relaxed text-amber-200">
-            This package contains claim authorization and encrypted input data required
-            by recipients. Save it locally and do not publish it.
-          </p>
+          {outcome.vault.status === "stored" && (
+            <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.08] px-4 py-3 text-[13px] leading-relaxed text-emerald-200">
+              <p className="font-semibold">Claim Vault stored</p>
+              <p className="mt-1">
+                Recipients can now discover this airdrop from /drops. Stored{" "}
+                {outcome.vault.storedCount} encrypted capsule
+                {outcome.vault.storedCount === 1 ? "" : "s"} using{" "}
+                {outcome.vault.persistent
+                  ? "persistent vault storage"
+                  : "local development memory storage"}.
+              </p>
+            </div>
+          )}
+
+          {outcome.vault.status !== "stored" && (
+            <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.08] px-4 py-3 text-[13px] leading-relaxed text-amber-200">
+              <p className="font-semibold">
+                Claim Vault is not configured in this environment.
+              </p>
+              <p className="mt-1">
+                Use the developer diagnostic page for package testing. Normal
+                recipients will use /drops once the vault is configured.
+              </p>
+            </div>
+          )}
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() =>
-                copyText("package", JSON.stringify(outcome.pkg, null, 2))
-              }
-              className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-[13px] font-medium text-zinc-200 transition hover:bg-white/10"
-            >
-              {copied === "package" ? "Copied ✓" : "Copy distribution package JSON"}
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                copyText("instructions", recipientInstructions(outcome))
-              }
-              className="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-[13px] font-medium text-zinc-200 transition hover:bg-white/10"
-            >
-              {copied === "instructions"
-                ? "Copied ✓"
-                : "Copy recipient portal instructions"}
-            </button>
+            <Link href="/drops" className="btn-primary px-4 py-2 text-[13px]">
+              Open Drops dashboard
+            </Link>
             <Link
               href="/drop/demo"
               className="text-[13px] text-violet-300 underline decoration-violet-500/40 underline-offset-4 hover:text-violet-200"
             >
-              View the demo Distribution Room →
+              View Drop Proof →
             </Link>
           </div>
           <p className="mt-2 text-[12px] leading-relaxed text-zinc-500">
-            Next steps: keep the package JSON safe (it holds each recipient&apos;s claim
-            authorization), and deliver it to recipients out-of-band. Recipients import
-            it at the recipient portal (/recipient/demo) to decrypt and claim. The demo
-            Distribution Room link above is a demo example — this new distribution does
-            not have its own room page yet.
+            Next steps: recipients connect their wallet from /drops, privately check
+            eligible claim packages, then reveal, claim, and verify. The demo
+            Drop Proof link is still a public proof-room example.
           </p>
         </Card>
       )}

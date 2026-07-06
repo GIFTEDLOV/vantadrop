@@ -26,12 +26,46 @@ early proof, but it is not the right long-term product surface:
 The product direction is therefore:
 
 - Keep the public registry limited to public distribution metadata.
-- Move recipient-specific claim material into encrypted client-side capsules.
-- Store only ciphertext server-side.
-- Give recipients either a private link or a wallet-based discovery path.
+- Move manual package handling out of the public user experience.
+- Use an encrypted Claim Vault for wallet discovery in the MVP.
+- Keep Private Link Mode as the stronger browser-encrypted path for later.
+- Give recipients a wallet-based discovery path that does not require JSON paste,
+  uploads, or package files.
 
 This preserves the core privacy boundary while making the recipient experience
 feel like a product instead of a diagnostic.
+
+### Paychain-style wallet discovery correction
+
+VantaDrop is moving manual package handling out of the public UX. Normal users
+should not paste claim package JSON, upload package files, download package
+files, or handle raw claim material. Manual import remains only in the hidden
+developer diagnostic page: `/dev/recipient-claim-diagnostic`.
+
+For wallet discovery without a private link, pure browser-only encryption is not
+enough unless recipients pre-register encryption keys or the protocol adds a
+separate wallet-bound key wrapping layer. The recommended MVP is therefore a
+server-side encrypted Claim Vault:
+
+- The sender flow sends plaintext claim capsules to the backend after the
+  TokenOps distribution and claim signatures are created.
+- The backend encrypts each capsule at rest with AES-256-GCM.
+- The backend releases a decrypted capsule only after nonce-backed
+  wallet-ownership verification for the matching recipient wallet.
+- Eligibility signatures use one-time challenges with expiry and replay
+  protection. Static reusable lookup messages are not acceptable.
+- Recipient lookup records use server-side HMAC keys derived from
+  `CLAIM_VAULT_LOOKUP_SECRET` instead of raw wallet-address storage keys.
+- VantaDropRegistry still stores public metadata only and never stores
+  recipient addresses, recipient lists, allocation amounts, notes, claim
+  signatures, encrypted handles, or input proofs.
+
+Private Link Mode can remain stronger end-to-end later because the browser can
+encrypt the capsule before upload and keep the decryption key in the URL hash.
+Wallet Discovery Mode is the better product UX, but it requires trusted
+encrypted backend storage and honest copy. Public text must say that wallet
+discovery uses trusted encrypted backend storage, not the browser-only
+encryption boundary of Private Link Mode.
 
 ## 2. Two Access Modes
 
@@ -70,10 +104,18 @@ Flow:
 2. Recipient connects wallet.
 3. App shows Ongoing, Future, and Past public airdrops.
 4. Recipient clicks **Check eligibility** on a drop card.
-5. Browser computes a wallet-derived lookup key.
-6. Backend checks whether an encrypted capsule exists for that lookup key.
-7. If one exists, backend returns the encrypted capsule only.
-8. Browser decrypts locally and opens the claim flow.
+5. Browser requests a one-time eligibility challenge from the backend.
+6. Browser asks the recipient to sign that nonce-bound harmless
+   wallet-ownership message.
+7. Backend verifies the nonce exists, belongs to the same distribution and
+   wallet, has not expired, and has not already been consumed.
+8. Backend verifies the signature recovers the connected wallet.
+9. Backend consumes the nonce so the signature cannot be replayed.
+10. Backend checks whether an encrypted capsule exists for that
+   distribution/wallet pair.
+11. If one exists, backend decrypts it server-side and returns the capsule only
+   to that verified matching wallet.
+12. Browser opens the claim flow without JSON paste or package files.
 
 Required product copy:
 
@@ -86,10 +128,12 @@ contract-side recipient list.
 Privacy properties:
 
 - Public users see only public distribution metadata.
-- Recipient-specific material is returned only when the browser presents the
-  correct lookup key.
+- Claim material is encrypted at rest in the Claim Vault and access-controlled
+  by wallet signature verification.
 - Backend can observe that a lookup occurred for a distribution and whether a
-  capsule exists, so rate limiting and careful response design are required.
+  capsule exists, and it handles plaintext during sender storage and verified
+  recipient release. Rate limiting, access control, and honest copy are
+  required.
 
 ## 3. Recommended Storage
 
@@ -109,7 +153,7 @@ Recommended key families:
 ```text
 drop:{distributionId} -> public distribution metadata
 claim:{claimId} -> encrypted claim capsule
-lookup:{distributionId}:{lookupKey} -> claimId
+lookup:{hmacLookupKey} -> claimId
 drop_claims:{distributionId} -> claimId set/list for sender/admin maintenance
 ```
 
@@ -139,14 +183,13 @@ Private Link Mode:
 
 Wallet Discovery Mode:
 
-- The backend returns encrypted ciphertext after a lookup-key match.
-- The architecture still needs a key-delivery decision before implementation:
-  either the discoverable capsule uses a wallet-derived encryption key, or the
-  lookup response returns a key-wrapped capsule that only the connected wallet
-  can unlock.
-- For the first demo implementation, keep this explicit and conservative:
-  design the helper layer so Private Link encryption is fully specified first,
-  then add discoverable key wrapping only after threat-model review.
+- The MVP does not use this browser-only WebCrypto model.
+- The sender flow sends plaintext capsules to the server after TokenOps signing.
+- The server encrypts each capsule at rest using Node `crypto` AES-256-GCM.
+- The server decrypts and returns a capsule only after wallet-ownership
+  verification for the matching recipient wallet.
+- A future private-link implementation can still use the browser-encrypted
+  URL-hash-key model above.
 
 Minimum cryptographic requirements:
 
@@ -208,13 +251,16 @@ Notes:
 - `lookupKey` is a routing key, not plaintext claim data.
 - `encryptedCiphertext` contains the encrypted plaintext capsule.
 - `encryptionNonce` is not secret but must be unique for the capsule key.
-- The backend must treat the full object as sensitive operational data even
-  though it cannot decrypt the claim contents.
+- The backend must treat the full object as sensitive operational data. In
+  wallet discovery mode, the backend can decrypt with the server-side Claim Vault
+  key; in private-link mode, the backend should not have the URL hash key.
 
 ### Plaintext Capsule Before Encryption
 
-The plaintext capsule exists only in browser memory before encryption and in the
-recipient browser after decryption.
+In Private Link Mode, the plaintext capsule exists only in browser memory before
+encryption and in the recipient browser after decryption. In Wallet Discovery
+Mode MVP, the plaintext capsule is received by the backend from the sender flow,
+encrypted at rest, and returned only to the verified matching wallet.
 
 ```ts
 type PlaintextClaimCapsule = {
@@ -234,59 +280,78 @@ type PlaintextClaimCapsule = {
 ```
 
 Privacy rule: this plaintext shape must never be stored in VantaDropRegistry,
-sent to a backend endpoint as plaintext, logged, committed, or rendered to anyone
-except the intended recipient after an explicit decrypt/reveal action.
+logged, committed, or rendered to anyone except the intended recipient after an
+explicit decrypt/reveal action. In Private Link Mode it should not be sent to the
+backend as plaintext. In the Wallet Discovery MVP, the sender flow sends it to
+the Claim Vault endpoint so the server can encrypt it at rest and later release
+it only to the verified matching wallet.
 
 ## 6. Lookup Key Design
 
-Use:
+Use a server-side HMAC lookup key:
 
 ```text
-lookupKey = hash(distributionId + chainId + connectedWallet + distributionSalt)
+lookupKey = HMAC_SHA256(CLAIM_VAULT_LOOKUP_SECRET, distributionId + ":" + recipientWalletLowercase)
 ```
 
 Recommended details:
 
 - Normalize `connectedWallet` to lowercase checksum-insensitive address text
-  before hashing.
-- Include `chainId` to prevent cross-chain key collisions.
-- Generate `distributionSalt` per distribution.
-- Store `distributionSalt` in backend metadata for discoverable drops, not in
-  VantaDropRegistry.
-- Treat the salt as public-but-random unless a later design adds authenticated
-  salt delivery. A public salt still reduces simple precomputed address
-  enumeration across all drops, but it does not stop targeted brute force.
+  before deriving the key.
+- Use `CLAIM_VAULT_LOOKUP_SECRET` when configured.
+- If `CLAIM_VAULT_LOOKUP_SECRET` is absent, fall back to
+  `CLAIM_VAULT_ENCRYPTION_KEY` only when that key is present.
+- Do not use hardcoded lookup secrets in production.
+- Store lookup records by HMAC key, not by raw wallet address.
+- The encrypted capsule may still contain the recipient wallet in ciphertext so
+  the server can verify the decrypted capsule belongs to the signed wallet
+  before returning it.
 
 Flow:
 
 1. Recipient connects wallet.
-2. Browser fetches public drop metadata for a discoverable distribution,
-   including the distribution salt if needed for lookup.
-3. Browser computes `lookupKey`.
-4. Browser calls:
+2. Browser requests a one-time challenge:
 
 ```text
-GET /api/claims/lookup?distributionId=...&lookupKey=...
+POST /api/claim-vault/challenge
 ```
 
-5. Backend checks whether `lookup:{distributionId}:{lookupKey}` exists.
-6. If present, backend returns the encrypted claim capsule.
-7. If absent, backend returns a generic not-eligible response.
+3. Backend stores `{ distributionId, walletAddressLowercase, nonce, message,
+   issuedAt, expiresAt }` with a short TTL.
+4. Browser asks the wallet to sign the returned message.
+5. Browser submits:
+
+```text
+POST /api/claim-vault/lookup
+```
+
+with `distributionId`, `walletAddress`, `message`, `signature`, and `nonce`.
+6. Backend verifies the nonce, expiry, wallet binding, distribution binding, and
+   signature.
+7. Backend deletes the challenge after a valid signed lookup attempt, before
+   returning eligibility.
+8. Backend derives the HMAC lookup key and checks whether a matching capsule
+   exists.
+9. If present, backend decrypts and returns the capsule only to the verified
+   wallet.
+10. If absent, backend returns a generic not-eligible response.
 
 Privacy properties:
 
-- Browser computes the lookup key.
-- Backend only checks whether an encrypted capsule exists.
-- Backend does not learn allocation amount, note, claim signature, encrypted
-  handle, or input proof.
-- The salt reduces simple address enumeration, especially precomputed lookups
-  across many distributions.
+- Storage keys do not expose raw recipient wallet addresses.
+- The backend does not enumerate recipients and returns a generic not-eligible
+  response for misses.
+- One-time challenges prevent replay of old eligibility signatures.
+- Wallet discovery is not end-to-end encrypted in the MVP: the backend receives
+  claim material from the sender flow and decrypts it for the verified matching
+  recipient. This must remain clear in public copy.
 
 Important limitation:
 
-- If an attacker has the public distribution id, chain id, distribution salt, and
-  a target address list, they can compute candidate lookup keys. Rate limits,
-  generic responses, and monitoring are still required.
+- The backend can observe challenge and lookup requests, and it can tell whether
+  a verified wallet has a capsule for a distribution. Rate limits, generic
+  responses, short challenge TTLs, replay protection, and monitoring are still
+  required.
 
 ## 7. Routes
 
@@ -442,74 +507,99 @@ Wallet Discovery Mode:
 1. Recipient opens `/drops`.
 2. Recipient connects wallet.
 3. Recipient clicks **Check eligibility** on a distribution card.
-4. Browser computes lookup key.
-5. Backend returns encrypted capsule if eligible.
-6. Browser decrypts or unwraps the capsule according to the finalized discovery
-   key model.
-7. Recipient continues through the same claim flow.
+4. Browser requests a one-time eligibility challenge.
+5. Recipient signs the harmless nonce-bound message.
+6. Backend verifies and consumes the challenge.
+7. Backend derives the server-side HMAC lookup key.
+8. Backend decrypts and returns the capsule only if it belongs to the verified
+   wallet.
+9. Recipient continues through the same claim flow.
 
 Recipient copy must stay honest:
 
 - The app can say it privately checks for eligible claim packages.
 - The app must not imply a public contract recipient list exists.
-- The app must not imply the backend can read the claim package.
+- The app must not imply wallet discovery is end-to-end encrypted in the MVP.
+- The app should say claim material is stored in VantaDrop's encrypted Claim
+  Vault and released only to the matching wallet.
 
 ## 11. API Endpoints
 
-Proposed endpoints only. Do not implement in this phase.
+Current MVP endpoints for Claim Vault wallet discovery.
 
-### `POST /api/claims/capsules`
+### `POST /api/claim-vault/capsules`
 
-Purpose: store encrypted capsules after sender execution.
+Purpose: store public drop metadata and server-encrypted capsules after sender
+execution.
 
 Input:
 
-- distribution metadata reference
-- encrypted capsule records
-- optional lookup mappings for discoverable mode
+- `publicDropMetadata`
+- `recipientCapsules[]` with recipient wallet, claim authorization, encrypted
+  input handle/proof, token, TokenOps airdrop, chain id, and distribution id
 
 Rules:
 
-- Reject plaintext claim fields at runtime where possible.
-- Do not accept `amount`, `recipientWallet`, `claimAuthorization`,
-  `encryptedInput.handle`, or `encryptedInput.inputProof` as top-level plaintext
-  API fields.
-- Store encrypted ciphertext only.
+- Requires Claim Vault secrets.
+- Encrypt each capsule server-side with AES-256-GCM.
+- Store lookup records by server-side HMAC key, not raw wallet-address keys.
+- Return only safe storage summary fields.
+- Do not log plaintext capsules.
 
-### `GET /api/claims/:claimId`
+### `POST /api/claim-vault/challenge`
 
-Purpose: fetch encrypted capsule by private link claim id.
+Purpose: create a one-time wallet-ownership challenge for eligibility lookup.
+
+Input:
+
+- `distributionId`
+- `walletAddress`
 
 Returns:
 
-- encrypted capsule metadata
-- encrypted ciphertext
-- nonce
-- algorithm
+- `message`
+- `nonce`
+- `expiresAt`
 
-Does not return:
+Rules:
 
-- plaintext recipient wallet
-- amount
-- note
-- claim signature
-- handle
-- input proof
+- Generate a cryptographically random nonce.
+- Store challenge server-side with short expiry.
+- Message must clearly say the signature only proves wallet ownership and does
+  not move funds or grant approvals.
 
-### `GET /api/claims/lookup?distributionId=...&lookupKey=...`
+### `POST /api/claim-vault/lookup`
 
 Purpose: wallet discovery lookup.
 
+Input:
+
+- `distributionId`
+- `walletAddress`
+- `message`
+- `signature`
+- `nonce`
+
 Returns:
 
-- generic not-found/not-eligible response, or
-- encrypted capsule for the matching lookup key
+- generic not-eligible response, or
+- plaintext capsule only for the verified matching wallet
 
 Rules:
 
+- Verify nonce exists, matches distribution/wallet, and has not expired.
+- Verify the wallet signature against the exact challenge message.
+- Consume/delete the challenge after a valid signed lookup attempt.
+- Do not allow replay of old eligibility signatures.
+- Derive lookup keys with `HMAC_SHA256(CLAIM_VAULT_LOOKUP_SECRET, ...)`.
 - Rate limit by IP, distribution id, and wallet session where possible.
 - Avoid overly detailed failure reasons before decrypt/preflight.
 - Do not leak recipient counts beyond public `recipientCount`.
+
+### `GET /api/claim-vault/:claimId`
+
+Future private-link route for fetching encrypted ciphertext by private link claim
+id. Not required for the wallet discovery MVP.
 
 ### `GET /api/drops`
 
@@ -532,7 +622,6 @@ Returns:
 - TokenOps clone address
 - registry address
 - privacy mode
-- distribution salt if needed for discoverable lookup
 
 Does not return recipient-specific claim data.
 
@@ -616,38 +705,37 @@ Create this document. No code, contracts, SDK logic, or deployments change.
 
 ### Phase 2: Encrypted Capsule Helpers
 
-Add browser-only helpers for:
+Add Claim Vault helpers for:
 
-- AES-GCM key generation
-- capsule encryption
-- capsule decryption
-- URL hash key encoding/decoding
-- lookup key hashing
+- server-side AES-256-GCM encryption at rest for wallet discovery
+- future browser-side AES-GCM encryption for private-link mode
+- one-time eligibility challenges
+- HMAC lookup keys
 
-No backend writes yet.
+No contracts, TokenOps SDK logic, or deployments change.
 
 ### Phase 3: Backend KV Endpoints
 
 Add Vercel KV / Upstash Redis integration and API endpoints:
 
-- `POST /api/claims/capsules`
-- `GET /api/claims/:claimId`
-- `GET /api/claims/lookup`
+- `POST /api/claim-vault/capsules`
+- `POST /api/claim-vault/challenge`
+- `POST /api/claim-vault/lookup`
 - `GET /api/drops`
 - `GET /api/drops/:id`
 
-Keep validation strict so plaintext claim fields are rejected outside encrypted
-ciphertext.
+Keep validation strict, avoid plaintext logs, store encrypted capsules at rest,
+and keep public drop endpoints metadata-only.
 
 ### Phase 4: Sender Capsule Creation / Private Links
 
 Extend `/create` after successful TokenOps execution:
 
-- create plaintext capsules in browser memory
-- encrypt capsules client-side
-- store encrypted capsules
-- generate private links
-- show secure sharing instructions
+- create plaintext capsules in browser memory after TokenOps execution
+- send capsules to Claim Vault storage endpoint
+- encrypt capsules server-side at rest for wallet discovery MVP
+- show Claim Vault discovery status
+- reserve private-link generation for a later E2E mode
 
 Do not change the TokenOps execution sequence.
 

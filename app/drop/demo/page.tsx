@@ -7,160 +7,227 @@ import {
   TOKENOPS_AIRDROP_FACTORY,
   TX,
 } from "../../../lib/constants";
-import { AddressLink, Badge, Card, KeyValueRow, SectionLabel, TxLink } from "../../../components/ui";
-import { PrivacyModel } from "../../../components/PrivacyModel";
+import {
+  AddressLink,
+  Badge,
+  GradientCard,
+  KeyValueRow,
+  SectionLabel,
+  Timeline,
+  TxLink,
+} from "../../../components/ui";
+import { PrivacyPanel } from "../../../components/PrivacyPanel";
 import { VerificationPanel } from "../../../components/VerificationPanel";
 
 export const metadata: Metadata = {
-  title: "Genesis Confidential Airdrop — Demo Distribution",
+  title: "Genesis Confidential Airdrop - Demo Distribution",
   description:
-    "The proven VantaDrop demo distribution on Sepolia: real contracts, real transactions, encrypted allocation.",
+    "The proven VantaDrop demo distribution on Sepolia: public metadata, TokenOps clone, registry boundary, and recipient instructions.",
 };
 
 const timeline = [
   {
-    title: "Distribution created + funded",
+    title: "Distribution created and funded",
     detail:
-      "TokenOps ConfidentialAirdropCloneable clone deployed and funded with an FHE-encrypted amount in a single transaction.",
-    tx: TX.createAndFundConfidentialAirdrop,
+      "TokenOps deployed and funded a ConfidentialAirdrop clone on Sepolia. The funding amount was handled confidentially.",
+    status: "done" as const,
+    meta: <TxLink hash={TX.createAndFundConfidentialAirdrop} />,
   },
   {
-    title: "Claim window opened",
+    title: "Public metadata boundary",
     detail:
-      "Claim window opened immediately at creation (startTimestamp = now), 7-day duration. No separate transaction — configured in the create call.",
-    tx: null,
+      "VantaDropRegistry is for title, use case, token address, clone address, and recipient count only.",
+    status: "done" as const,
   },
   {
-    title: "Recipient granted own decrypt access",
+    title: "Recipient granted decrypt access",
     detail:
-      "The recipient called getClaimAmount, granting themselves ACL access, then decrypted their allocation client-side: 1000000 raw units (1.0 CTTT).",
-    tx: TX.getClaimAmount,
+      "The recipient called getClaimAmount, granting their own address ACL access to decrypt their allocation.",
+    status: "done" as const,
+    meta: <TxLink hash={TX.getClaimAmount} />,
   },
   {
-    title: "Claimed",
+    title: "Recipient claimed and verified",
     detail:
-      "The recipient claimed; post-claim balance decrypted to 1000000 raw units — confirming the confidential transfer moved real value.",
-    tx: TX.claim,
+      "The recipient claimed successfully and verified confidential balance client-side.",
+    status: "done" as const,
+    meta: <TxLink hash={TX.claim} />,
   },
+];
+
+const recipientSteps = [
+  "Connect the recipient wallet on Sepolia.",
+  "Open /drops and privately check eligible claim packages.",
+  "Sign the harmless eligibility message and grant decrypt access.",
+  "Decrypt only your own allocation, then claim and verify balance.",
 ];
 
 export default function DemoDropPage() {
   return (
-    <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6">
-      {/* ---------------- Header ---------------- */}
-      <div className="flex flex-wrap items-center gap-3">
-        <Badge tone="demo">Demo distribution</Badge>
-        <Badge tone="proven">Proven live on Sepolia</Badge>
-      </div>
-      <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-        Genesis Confidential Airdrop
-      </h1>
-      <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-zinc-400">
-        The first VantaDrop distribution, executed end-to-end against Sepolia. This page is
-        public — anyone can verify the contracts and transactions below. What no one can see:
-        the allocation amount, until the recipient decrypted it themselves.
-      </p>
-      <div className="mt-6">
-        <Link
-          href="/recipient/demo"
-          className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-violet-500 to-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
-        >
-          View as recipient →
-        </Link>
-      </div>
-
-      {/* ---------------- Facts ---------------- */}
-      <div className="mt-12 grid gap-4 lg:grid-cols-2">
-        <Card className="p-6">
-          <h3 className="mb-3 text-sm font-semibold text-white">Distribution</h3>
-          <KeyValueRow label="Name">Genesis Confidential Airdrop (demo)</KeyValueRow>
-          <KeyValueRow label="Use case">Private airdrop</KeyValueRow>
-          <KeyValueRow label="Network">Sepolia</KeyValueRow>
-          <KeyValueRow label="Recipients">
-            1 — the proven demo has exactly one recipient
-          </KeyValueRow>
-          <KeyValueRow label="Sender / admin">
-            <AddressLink address={DEMO.sender} />
-          </KeyValueRow>
-        </Card>
-        <Card className="p-6">
-          <h3 className="mb-3 text-sm font-semibold text-white">Contracts</h3>
-          <KeyValueRow label="Token (CTTT, ERC-7984)">
-            <AddressLink address={CTTT_TOKEN_ADDRESS} />
-          </KeyValueRow>
-          <KeyValueRow label="VantaDrop registry">
-            <AddressLink address={REGISTRY_ADDRESS} />
-          </KeyValueRow>
-          <KeyValueRow label="TokenOps factory">
-            <AddressLink address={TOKENOPS_AIRDROP_FACTORY} />
-          </KeyValueRow>
-          <KeyValueRow label="Airdrop clone">
-            <AddressLink address={DEMO.airdropClone} />
-          </KeyValueRow>
-        </Card>
-      </div>
-
-      {/* ---------------- Timeline ---------------- */}
-      <section className="mt-16">
-        <SectionLabel>Status timeline</SectionLabel>
-        <h2 className="mt-2 text-xl font-semibold tracking-tight text-white">
-          Every step below actually happened, in this order.
-        </h2>
-        <ol className="mt-8">
-          {timeline.map((item, i) => (
-            <li key={item.title} className="relative flex gap-4 pb-8 last:pb-0">
-              {i < timeline.length - 1 && (
-                <span className="timeline-line absolute left-[11px] top-7 h-full w-px" aria-hidden="true" />
-              )}
-              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-emerald-500/40 bg-emerald-500/10 text-[11px] text-emerald-300">
-                ✓
-              </span>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-sm font-semibold text-white">{item.title}</h3>
-                  <Badge tone="proven">Completed</Badge>
-                </div>
-                <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-zinc-500">
-                  {item.detail}
-                </p>
-                {item.tx && (
-                  <p className="mt-2 text-[13px]">
-                    <span className="mr-2 text-zinc-600">tx:</span>
-                    <TxLink hash={item.tx} />
-                  </p>
-                )}
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      {/* ---------------- Privacy model ---------------- */}
-      <section className="mt-16">
-        <SectionLabel>Privacy model</SectionLabel>
-        <h2 className="mb-8 mt-2 text-xl font-semibold tracking-tight text-white">
-          What this page can show you — and what it never could.
-        </h2>
-        <PrivacyModel />
-      </section>
-
-      {/* ---------------- Verification ---------------- */}
-      <section className="mt-16">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <SectionLabel>Live verification</SectionLabel>
-            <h2 className="mt-2 text-xl font-semibold tracking-tight text-white">
-              Verify it yourself.
-            </h2>
+    <div className="page-section-tight">
+      <section className="grid gap-8 lg:grid-cols-[1fr_380px]">
+        <div>
+          <div className="flex flex-wrap gap-2">
+            <Badge tone="demo">Distribution room</Badge>
+            <Badge tone="proven">Proven live on Sepolia</Badge>
           </div>
-          <Link
-            href="/verification"
-            className="text-sm text-violet-300 underline decoration-violet-500/40 underline-offset-4 hover:text-violet-200"
-          >
-            Open standalone panel →
-          </Link>
+          <h1 className="mt-4 max-w-4xl text-[clamp(38px,5vw,78px)] font-semibold leading-[0.96] tracking-[-0.075em] text-white">
+            Genesis Confidential Airdrop
+          </h1>
+          <p className="mt-5 max-w-3xl text-[15px] leading-relaxed text-zinc-400">
+            This room shows the public evidence for a confidential distribution. Anyone
+            can verify the contracts and transactions. What remains private: recipient
+            allocation amounts, claim signatures, handles, proofs, and Claim Vault
+            capsules.
+          </p>
+          <div className="mt-7 flex flex-wrap gap-3">
+            <Link href="/drops" className="btn-primary">
+              Open Drops Dashboard
+            </Link>
+            <Link href="/verification" className="btn-secondary">
+              Open Verification
+            </Link>
+          </div>
         </div>
-        <div className="mt-8">
+
+        <GradientCard className="p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300">
+            Room status
+          </p>
+          <div className="mt-5 grid gap-3">
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-4">
+              <span className="block text-[12px] uppercase tracking-[0.16em] text-zinc-500">
+                Network
+              </span>
+              <b className="mt-1 block text-white">Sepolia</b>
+            </div>
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-4">
+              <span className="block text-[12px] uppercase tracking-[0.16em] text-zinc-500">
+                Recipients public count
+              </span>
+              <b className="mt-1 block text-white">{DEMO.recipientCount}</b>
+            </div>
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-4">
+              <span className="block text-[12px] uppercase tracking-[0.16em] text-zinc-500">
+                Allocation privacy
+              </span>
+              <b className="mt-1 block text-white">Recipient-only decrypt</b>
+            </div>
+          </div>
+        </GradientCard>
+      </section>
+
+      <section className="mt-10 grid gap-4 xl:grid-cols-3">
+        <GradientCard className="p-6">
+          <SectionLabel>Public metadata</SectionLabel>
+          <div className="mt-4">
+            <KeyValueRow label="Name">Genesis Confidential Airdrop</KeyValueRow>
+            <KeyValueRow label="Use case">Private airdrop</KeyValueRow>
+            <KeyValueRow label="Network">Sepolia</KeyValueRow>
+            <KeyValueRow label="Recipients">{DEMO.recipientCount}</KeyValueRow>
+            <KeyValueRow label="Sender">
+              <AddressLink address={DEMO.sender} />
+            </KeyValueRow>
+          </div>
+        </GradientCard>
+
+        <GradientCard className="p-6">
+          <SectionLabel>TokenOps clone</SectionLabel>
+          <div className="mt-4">
+            <KeyValueRow label="Factory">
+              <AddressLink address={TOKENOPS_AIRDROP_FACTORY} />
+            </KeyValueRow>
+            <KeyValueRow label="Airdrop clone">
+              <AddressLink address={DEMO.airdropClone} />
+            </KeyValueRow>
+            <KeyValueRow label="Token">
+              <AddressLink address={CTTT_TOKEN_ADDRESS} />
+            </KeyValueRow>
+            <KeyValueRow label="Token standard">ERC-7984 confidential token</KeyValueRow>
+          </div>
+        </GradientCard>
+
+        <GradientCard className="p-6">
+          <SectionLabel>Registry panel</SectionLabel>
+          <div className="mt-4">
+            <KeyValueRow label="Registry">
+              <AddressLink address={REGISTRY_ADDRESS} />
+            </KeyValueRow>
+            <KeyValueRow label="Stores">Public metadata only</KeyValueRow>
+            <KeyValueRow label="Does not store">
+              <span className="text-right">recipients, amounts, notes, signatures</span>
+            </KeyValueRow>
+            <KeyValueRow label="Claim Vault">Encrypted off-chain capsules</KeyValueRow>
+          </div>
+        </GradientCard>
+      </section>
+
+      <section className="mt-12 grid gap-8 lg:grid-cols-[0.95fr_1.05fr]">
+        <div>
+          <SectionLabel>Status timeline</SectionLabel>
+          <h2 className="mt-3 text-[clamp(30px,4vw,56px)] font-semibold leading-[0.98] tracking-[-0.065em] text-white">
+            Public steps, private allocation.
+          </h2>
+          <p className="mt-4 text-[15px] leading-relaxed text-zinc-400">
+            Every transaction link below is public. None of those links reveal the
+            recipient allocation amount in plaintext.
+          </p>
+        </div>
+        <Timeline items={timeline} />
+      </section>
+
+      <section className="mt-12">
+        <SectionLabel>Privacy model</SectionLabel>
+        <div className="mt-5">
+          <PrivacyPanel />
+        </div>
+      </section>
+
+      <section className="mt-12 grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
+        <GradientCard className="p-6">
+          <SectionLabel>Recipient instructions</SectionLabel>
+          <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">
+            The room is public. Claim material is not.
+          </h2>
+          <p className="mt-3 text-[14px] leading-relaxed text-zinc-400">
+            Recipients connect from /drops and sign a harmless wallet-ownership
+            message. If the encrypted Claim Vault has a matching capsule, the claim
+            flow opens without JSON paste, upload, or package handling.
+          </p>
+          <ol className="mt-5 grid gap-3">
+            {recipientSteps.map((step, index) => (
+              <li key={step} className="flex gap-3 text-[13px] text-zinc-300">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border border-violet-500/30 bg-violet-500/10 font-mono text-[11px] text-violet-200">
+                  {index + 1}
+                </span>
+                <span className="pt-1">{step}</span>
+              </li>
+            ))}
+          </ol>
+        </GradientCard>
+
+        <GradientCard className="p-6">
+          <SectionLabel>Public verification links</SectionLabel>
+          <div className="mt-4 grid gap-3 text-[13px]">
+            <KeyValueRow label="Mint confidential CTTT">
+              <TxLink hash={TX.mintConfidential} />
+            </KeyValueRow>
+            <KeyValueRow label="Create + fund">
+              <TxLink hash={TX.createAndFundConfidentialAirdrop} />
+            </KeyValueRow>
+            <KeyValueRow label="Grant decrypt access">
+              <TxLink hash={TX.getClaimAmount} />
+            </KeyValueRow>
+            <KeyValueRow label="Claim">
+              <TxLink hash={TX.claim} />
+            </KeyValueRow>
+          </div>
+        </GradientCard>
+      </section>
+
+      <section className="mt-12">
+        <SectionLabel>Standalone verification</SectionLabel>
+        <div className="mt-5">
           <VerificationPanel compact />
         </div>
       </section>

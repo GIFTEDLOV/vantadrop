@@ -29,6 +29,16 @@ export function Dot({ className = "bg-emerald-400" }: { className?: string }) {
   return <span className={`inline-block h-1.5 w-1.5 rounded-full ${className}`} />;
 }
 
+export function StatusBadge({
+  tone = "neutral",
+  children,
+}: {
+  tone?: BadgeTone;
+  children: ReactNode;
+}) {
+  return <Badge tone={tone}>{children}</Badge>;
+}
+
 /* ------------------------------------------------------------------ */
 /* Cards                                                               */
 /* ------------------------------------------------------------------ */
@@ -41,9 +51,74 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div className={`rounded-xl border border-white/[0.08] bg-white/[0.02] ${className}`}>
+    <div
+      className={`surface-card border border-white/[0.08] bg-white/[0.025] ${className}`}
+    >
       {children}
     </div>
+  );
+}
+
+export function GradientCard({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <div className={`gradient-card ${className}`}>{children}</div>;
+}
+
+export function ProofCard({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <div className={`proof-card ${className}`}>{children}</div>;
+}
+
+export type TimelineItem = {
+  title: string;
+  detail?: ReactNode;
+  status?: "done" | "current" | "pending" | "error";
+  meta?: ReactNode;
+};
+
+export function Timeline({ items }: { items: TimelineItem[] }) {
+  return (
+    <ol className="grid gap-3">
+      {items.map((item, index) => {
+        const status = item.status ?? "pending";
+        const tone =
+          status === "done"
+            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+            : status === "error"
+              ? "border-rose-500/40 bg-rose-500/10 text-rose-300"
+              : status === "current"
+                ? "border-violet-500/50 bg-violet-500/15 text-violet-200"
+                : "border-white/10 bg-white/5 text-zinc-500";
+        return (
+          <li key={`${item.title}-${index}`} className="flow-step">
+            <span className={`flow-num border ${tone}`}>
+              {status === "done" ? "OK" : index + 1}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[14px] font-semibold text-white">
+                {item.title}
+              </span>
+              {item.detail && (
+                <span className="mt-1 block text-[12px] leading-relaxed text-zinc-500">
+                  {item.detail}
+                </span>
+              )}
+            </span>
+            {item.meta && <span className="text-[12px] text-zinc-500">{item.meta}</span>}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

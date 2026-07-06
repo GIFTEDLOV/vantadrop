@@ -4,7 +4,7 @@ import { RecipientPortal } from "../../../components/RecipientPortal";
 export const metadata: Metadata = {
   title: "Recipient Portal",
   description:
-    "Claim your confidential token allocation: import the claim package your sender shared privately, check eligibility, decrypt your own amount, and claim — all on Sepolia.",
+    "Claim your confidential token allocation after wallet discovery through VantaDrop's encrypted Claim Vault.",
 };
 
 export default function RecipientDemoPage() {

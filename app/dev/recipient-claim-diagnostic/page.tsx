@@ -722,7 +722,8 @@ export default function RecipientClaimDiagnosticPage() {
         </div>
         <p className="mt-3 text-[14px] leading-relaxed text-amber-200">
           Developer diagnostic only. Use the exact recipient burner wallet from the
-          distribution package. This may consume the claim once.
+          distribution package. Not part of the public recipient flow. This may
+          consume the claim once.
         </p>
       </Card>
 
