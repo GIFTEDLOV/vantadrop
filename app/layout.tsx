@@ -4,11 +4,15 @@ import { AppShell } from "../components/AppShell";
 
 export const metadata: Metadata = {
   title: {
-    default: "VantaDrop - Private token distributions. Public-chain settlement.",
+    default: "VantaDrop",
     template: "%s - VantaDrop",
   },
   description:
-    "Confidential ERC-7984 token distributions on Sepolia, powered by TokenOps and Zama FHE. Allocation amounts stay encrypted end-to-end; only recipients can decrypt their own.",
+    "Confidential token distributions on Sepolia, powered by TokenOps and Zama FHE. Allocation amounts stay encrypted end-to-end; only recipients can decrypt their own.",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    shortcut: [{ url: "/icon.svg", type: "image/svg+xml" }],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

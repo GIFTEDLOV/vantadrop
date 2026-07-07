@@ -139,6 +139,22 @@ Privacy properties:
 
 For demo and deployment, use **Vercel KV / Upstash Redis**.
 
+Claim Vault storage accepts either preferred Upstash REST env names or the
+writable Vercel Redis/KV integration aliases:
+
+Preferred:
+
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+
+Vercel Redis/KV aliases also supported:
+
+- `KV_REST_API_URL`
+- `KV_REST_API_TOKEN`
+
+Do not use `KV_REST_API_READ_ONLY_TOKEN` for Claim Vault writes because the
+Claim Vault must write encrypted capsules and eligibility challenges.
+
 Reasons:
 
 - Works naturally with a Vercel-hosted Next.js app.
