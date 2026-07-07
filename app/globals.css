@@ -84,19 +84,19 @@ body::before {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.026) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.026) 1px, transparent 1px);
-  background-size: 88px 88px;
-  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.68) 42%, transparent 92%);
-  opacity: 0.72;
+  /* Subtle film-grain dither. Replaces the old 88px line grid — whose 1px
+     seams read as faint boxes — and simultaneously breaks up 8-bit color
+     banding on the large dark gradient. Seamless via stitchTiles (no visible
+     tile repeat); desaturated so it stays a neutral grain, not colored speckle. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='vgrain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23vgrain)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.72) 55%, rgba(0, 0, 0, 0.42) 100%);
+  opacity: 0.045;
 }
 
 html[data-theme="light"] body::before {
-  background-image:
-    linear-gradient(rgba(45, 49, 63, 0.024) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(45, 49, 63, 0.024) 1px, transparent 1px);
-  opacity: 0.38;
+  /* Same grain, lighter touch — light surfaces band far less than dark ones. */
+  opacity: 0.025;
 }
 
 .app-shell {
