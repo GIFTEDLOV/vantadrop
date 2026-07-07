@@ -78,6 +78,7 @@
  *     balance" would be dishonest labeling.
  */
 
+import { notFound } from "next/navigation";
 import { useState } from "react";
 import type { Hex } from "viem";
 import { formatEther, isAddress } from "viem";
@@ -370,6 +371,15 @@ const claimButtonClass =
   "rounded-lg border-2 border-rose-500/60 bg-rose-500/15 px-4 py-2.5 text-[13px] font-bold text-rose-200 transition hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-40";
 
 export default function RecipientClaimDiagnosticPage() {
+  // Production guard: this hidden developer diagnostic handles real claim
+  // material and must never be reachable on a production build (e.g. the public
+  // vantadrop.vercel.app domain). In a client component `process.env.NODE_ENV`
+  // is inlined at build time, so this is a static branch — no rules-of-hooks
+  // concern — and the page stays fully available under local `next dev`.
+  if (process.env.NODE_ENV === "production") {
+    notFound();
+  }
+
   const wallet = useSepoliaWallet();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();

@@ -29,6 +29,7 @@
  * persisted or logged.
  */
 
+import { notFound } from "next/navigation";
 import { useState } from "react";
 import type { Hex } from "viem";
 import { usePublicClient, useWalletClient } from "wagmi";
@@ -88,6 +89,14 @@ const buttonClass =
   "rounded-lg border border-violet-500/40 bg-violet-500/10 px-3.5 py-2 text-[13px] font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40";
 
 export default function TokenOpsDiagnosticPage() {
+  // Production guard: keep this hidden developer diagnostic off any production
+  // build (the public domain) while leaving it fully usable under local `next
+  // dev`. `process.env.NODE_ENV` is inlined at build time in a client
+  // component, so this is a static branch with no rules-of-hooks concern.
+  if (process.env.NODE_ENV === "production") {
+    notFound();
+  }
+
   const wallet = useSepoliaWallet();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
