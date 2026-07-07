@@ -181,7 +181,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="border-y border-white/[0.06] bg-white/[0.015]">
+      <section className="proof-band">
         <div className="page-section">
           <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr]">
             <div>
@@ -218,7 +218,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="border-y border-white/[0.06] bg-white/[0.015]">
+      <section className="proof-band">
         <div className="page-section">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
@@ -311,7 +311,7 @@ export default function LandingPage() {
       </section>
 
       <section className="page-section pt-0">
-        <div className="rounded-[28px] border border-white/[0.10] bg-gradient-to-br from-violet-500/20 via-white/[0.04] to-cyan-400/10 p-8 text-center shadow-2xl shadow-black/30 md:p-12">
+        <div className="final-cta-panel p-8 text-center md:p-12">
           <SectionLabel>Ready for review</SectionLabel>
           <h2 className="mx-auto mt-3 max-w-4xl text-[clamp(36px,5vw,76px)] font-semibold leading-[0.96] tracking-[-0.075em] text-white">
             Confidential allocation data. Public settlement proof.

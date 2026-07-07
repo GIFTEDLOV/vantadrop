@@ -36,7 +36,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="app-shell" onPointerMove={handlePointerMove}>
       <div className="cursor-glow" aria-hidden="true" />
-      <div className="app-noise" aria-hidden="true" />
+      <div className="proof-field" aria-hidden="true" />
       <CollapsedSidebar theme={theme} onToggleTheme={toggleTheme} />
       <div className="shell-main">
         <TopBar />
